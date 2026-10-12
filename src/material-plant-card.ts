@@ -7,6 +7,7 @@ import { buildMeasurements, activeProblems, toneFor, formatValue, describeMeasur
 import { configForm } from './config-form';
 import { themeTokens } from './theme';
 import './gauge/plant-gauge';
+import './battery/battery-glyph';
 
 const REFRESH_INTERVAL = 5000;
 // One immutable, clean-room nine-lobe mask, shared by images and placeholders.
@@ -37,6 +38,9 @@ export class MaterialPlantCard extends LitElement {
   @state() private _config?: MaterialPlantCardConfig;
   @state() private _info?: PlantInfo;
   @state() private _failedSrc?: string;
+  @state() private _gaugesWidth = 0;
+  private _gaugesObserver?: ResizeObserver;
+  private _observedGauges?: Element;
   private _imageSrc?: string;
   private _lastFetch = -Infinity;
   private _request = 0;
@@ -112,9 +116,13 @@ export class MaterialPlantCard extends LitElement {
   public connectedCallback(): void {
     super.connectedCallback();
     if (this._pending) this._queueFetch();
+    this._observeGauges();
   }
   public disconnectedCallback(): void {
     super.disconnectedCallback();
+    this._gaugesObserver?.disconnect();
+    this._gaugesObserver = undefined;
+    this._observedGauges = undefined;
     if (this._timer !== undefined) clearTimeout(this._timer);
     this._timer = undefined;
     // A cancelled trailing fetch or invalidated response still needs replacement.
@@ -123,8 +131,36 @@ export class MaterialPlantCard extends LitElement {
     this._request++;
   }
 
+  private get _gaugeCapacity(): number {
+    return this._gaugesWidth > 0 ? Math.max(1, Math.floor((this._gaugesWidth + 4) / 48)) : 6;
+  }
+
+  protected updated(): void {
+    // Metadata/config changes can add, remove or replace the gauges container.
+    this._observeGauges();
+  }
+
+  private _observeGauges(): void {
+    if (!this.isConnected) return;
+    const container = this.renderRoot.querySelector('.gauges') ?? undefined;
+    if (container === this._observedGauges) return;
+    this._gaugesObserver?.disconnect();
+    this._observedGauges = container;
+    if (!container) return;
+    this._gaugesObserver ??= new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (!this.isConnected || entry.target !== this._observedGauges) continue;
+        const width = entry.contentRect.width;
+        const capacity = width > 0 ? Math.max(1, Math.floor((width + 4) / 48)) : 6;
+        // A new row changes height, not capacity: don't trigger a feedback render.
+        if (capacity !== this._gaugeCapacity) this._gaugesWidth = width;
+      }
+    });
+    this._gaugesObserver.observe(container);
+  }
+
   protected shouldUpdate(changed: PropertyValues): boolean {
-    if (changed.has('_config') || changed.has('_info') || changed.has('_failedSrc')) return true;
+    if (changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugesWidth')) return true;
     if (!this._config || !this.hass || !changed.has('hass')) return false;
     const old = changed.get('hass') as HomeAssistant | undefined;
     if (!old) return true;
@@ -153,7 +189,8 @@ export class MaterialPlantCard extends LitElement {
     const hideUnits = cfg.hide_units ?? compact;
     const measurements = buildMeasurements(this._info, cfg.show_bars ?? DEFAULT_GAUGES, this.hass.states);
     const n = measurements.length;
-    const columns = n <= 6 ? n : Math.ceil(n / Math.ceil(n / 6));
+    const rows = Math.ceil(n / this._gaugeCapacity);
+    const columns = n ? Math.ceil(n / rows) : 1;
     const problems = activeProblems(plant, measurements, cfg);
     const name = cfg.name || plant.attributes.friendly_name || cfg.entity;
     const subtitle = problems.length
@@ -167,7 +204,7 @@ export class MaterialPlantCard extends LitElement {
       this._failedSrc = undefined;
     }
     const batteryState = cfg.battery_sensor ? this.hass.states[cfg.battery_sensor] : undefined;
-    const battery = batteryInfo(batteryState, cfg.battery_warn_level, cfg.battery_ok_level);
+    const battery = batteryInfo(batteryState, cfg.battery_warn_level);
     return html`
       <ha-card class=${compact ? 'compact' : 'full'}>
         <div class=${`header ${cfg.hide_image ? 'no-image' : ''}`}>
@@ -176,16 +213,21 @@ export class MaterialPlantCard extends LitElement {
               ${src && src !== this._failedSrc
                 ? html`<img class="photo" src=${src} alt="" @error=${() => { this._failedSrc = src; }}>`
                 : html`<span class="photo placeholder"><ha-icon icon="mdi:flower-outline" aria-hidden="true"></ha-icon></span>`}
-              ${problems.length ? html`<span class="problem-badge" aria-label="Needs attention"><ha-icon icon="mdi:alert-circle" aria-hidden="true"></ha-icon></span>` : nothing}
+              ${problems.length ? html`<span class="problem-badge" aria-label="Needs attention">
+                <svg viewBox="0 0 18 18" aria-hidden="true" focusable="false">
+                  <rect x="8" y="4" width="2" height="6.5" rx="1"></rect>
+                  <circle cx="9" cy="13.25" r="1.25"></circle>
+                </svg>
+              </span>` : nothing}
             </button>`}
           <button class="text-btn" type="button" aria-label=${`More information about ${name}`} @click=${() => this._moreInfo(cfg.entity)}>
             <span class="name" title=${name}>${name}</span>
             ${subtitle ? html`<span class=${`subtitle ${problems.length ? 'problems' : ''}`} title=${subtitle}>${subtitle}</span>` : nothing}
           </button>
           ${batteryState ? html`
-            <button class="battery" type="button" data-tone=${battery.tone} aria-label=${`Battery: ${battery.level === null ? 'unknown' : `${battery.level}%`}. More information`}
+            <button class="battery" type="button" aria-label=${`Battery: ${battery.level === null ? 'unknown' : `${battery.level}%`}. More information`}
               @click=${(event: Event) => { event.stopPropagation(); this._moreInfo(cfg.battery_sensor!); }}>
-              <ha-icon icon=${battery.icon} aria-hidden="true"></ha-icon><span>${battery.level === null ? '—' : `${battery.level}%`}</span>
+              <mpl-battery .level=${battery.level} .tone=${battery.tone}></mpl-battery>
             </button>` : nothing}
         </div>
         ${measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
@@ -206,23 +248,19 @@ export class MaterialPlantCard extends LitElement {
     .image-btn { position: relative; width: 56px; height: 56px; border-radius: var(--mpl-shape-full); }
     .photo { display: block; width: 100%; height: 100%; object-fit: cover; mask-image: ${unsafeCSS(cookieMask)}; -webkit-mask-image: ${unsafeCSS(cookieMask)}; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; }
     .placeholder { display: grid; place-items: center; background: var(--mpl-secondary-container); color: var(--mpl-on-secondary-container); }
-    .problem-badge { position: absolute; bottom: 0; right: 0; display: grid; place-items: center; width: 20px; height: 20px; border-radius: var(--mpl-shape-full); background: var(--mpl-error-container); color: var(--mpl-on-error-container); }
-    .problem-badge ha-icon { --mdc-icon-size: 16px; }
+    .problem-badge { position: absolute; bottom: 0; right: 0; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--mpl-shape-full); background: var(--mpl-error); box-shadow: 0 0 0 2px var(--mpl-surface-bg); }
+    .problem-badge svg { display: block; width: 18px; height: 18px; fill: var(--mpl-on-error); }
     .text-btn { min-width: 0; min-height: 44px; text-align: left; border-radius: 12px; }
     .name, .subtitle { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .name { font-size: 16px; font-weight: 500; line-height: 24px; color: var(--mpl-on-surface); }
     .subtitle { font-size: 14px; line-height: 20px; color: var(--mpl-on-surface-variant); }
     .problems { color: var(--mpl-error); }
-    .battery { position: relative; display: inline-flex; gap: 4px; align-items: center; height: 28px; padding: 0 10px; border-radius: var(--mpl-shape-full); background: var(--mpl-surface-container-high); font-size: 12px; font-weight: 500; color: var(--mpl-on-surface-variant); white-space: nowrap; }
-    /* Preserve the specified 28px visual chip and give it a 44px touch target. */
-    .battery::before { content: ''; position: absolute; inset: -8px 0; }
-    .battery ha-icon { --mdc-icon-size: 18px; }
-    .battery[data-tone='warn'] { color: var(--mpl-tertiary); }
-    .battery[data-tone='low'] { color: var(--mpl-error); }
-    .battery[data-tone='unknown'] { color: var(--mpl-outline); }
-    .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(44px, calc(100% / var(--mpl-cols, 6) - 4px)), 1fr)); gap: 4px; margin-top: 12px; }
-    .gauge-btn { display: grid; justify-items: center; min-width: 0; min-height: 44px; border-radius: 12px; }
-    .gauge-btn:hover, .text-btn:hover { background: color-mix(in srgb, var(--mpl-on-surface) 8%, transparent); }
+    .battery { position: relative; display: inline-flex; align-items: center; padding: 4px; border-radius: 8px; }
+    /* The 30x15 glyph plus padding stays bare; the invisible hit area is 44x44. */
+    .battery::before { content: ''; position: absolute; width: max(100%, 44px); height: max(100%, 44px); left: 50%; top: 50%; transform: translate(-50%, -50%); }
+    .gauges { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 12px; }
+    .gauge-btn { flex: 0 0 calc((100% - (var(--mpl-cols) - 1) * 4px) / var(--mpl-cols)); display: grid; justify-items: center; min-width: 0; min-height: 44px; border-radius: 12px; }
+    .gauge-btn:hover, .text-btn:hover, .battery:hover { background: color-mix(in srgb, var(--mpl-on-surface) 8%, transparent); }
     .gauge-btn:active, .text-btn:active { background: color-mix(in srgb, var(--mpl-on-surface) 12%, transparent); }
     .compact .image-btn { width: 40px; height: 40px; }
     .compact .gauges { margin-top: 8px; }

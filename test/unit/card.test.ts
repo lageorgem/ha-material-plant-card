@@ -35,6 +35,13 @@ async function settle(card: MaterialPlantCard): Promise<void> {
   await Promise.resolve();
   await card.updateComplete;
 }
+async function settleLayout(card: MaterialPlantCard): Promise<void> {
+  for (let frame = 0; frame < 3; frame++) {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    await settle(card);
+  }
+  for (const gauge of gauges(card)) await gauge.updateComplete;
+}
 async function mount(config = cfg(), hass = fakeHass()): Promise<MaterialPlantCard> {
   const card = await fixture<MaterialPlantCard>(html`<material-plant-card></material-plant-card>`);
   card.setConfig(config);
@@ -119,6 +126,17 @@ describe('material-plant-card', () => {
     await settle(card);
     expect(query(card, '.subtitle').textContent).to.equal('Moisture low · Temperature high');
     expect(query(card, '.problem-badge')).not.to.equal(null);
+    const badge = query(card, '.problem-badge');
+    const svg = badge.querySelector('svg')!;
+    expect(svg).not.to.equal(null);
+    expect(badge.querySelector('ha-icon')).to.equal(null);
+    expect(badge.getAttribute('aria-label')).to.equal('Needs attention');
+    const badgeBox = badge.getBoundingClientRect();
+    const svgBox = svg.getBoundingClientRect();
+    expect(svgBox.width).to.equal(18);
+    expect(svgBox.height).to.equal(18);
+    expect(svgBox.x + svgBox.width / 2).to.be.closeTo(badgeBox.x + badgeBox.width / 2, 0.5);
+    expect(svgBox.y + svgBox.height / 2).to.be.closeTo(badgeBox.y + badgeBox.height / 2, 0.5);
     card.setConfig(cfg({ hide_species: true }));
     await settle(card);
     expect(query(card, '.subtitle').textContent).to.include('Moisture low');
@@ -181,14 +199,22 @@ describe('material-plant-card', () => {
     }
   });
 
-  for (const [value, tone, text] of [['80', 'ok', '80%'], ['30', 'warn', '30%'],
-    ['19', 'low', '19%'], ['unknown', 'unknown', '—']]) {
-    it(`renders ${tone} battery chip`, async () => {
+  for (const [value, tone, level] of [['49', 'ok', 49], ['10', 'ok', 10],
+    ['8', 'low', 8], ['unknown', 'unknown', null]] as const) {
+    it(`renders a bare ${tone} battery glyph for ${value}`, async () => {
       const hass = fakeHass();
       hass.states[BATTERY] = state(value);
       const card = await mount(cfg({ battery_sensor: BATTERY }), hass);
-      expect(query(card, '.battery').getAttribute('data-tone')).to.equal(tone);
-      expect(query(card, '.battery').textContent!.trim()).to.equal(text);
+      const button = query(card, '.battery');
+      const glyph = query(card, '.battery mpl-battery');
+      expect(glyph).to.have.property('level', level);
+      expect(glyph).to.have.property('tone', tone);
+      expect(button.children).to.have.length(1);
+      expect(button.querySelector('ha-icon')).to.equal(null);
+      expect(button.querySelector('span')).to.equal(null);
+      expect(button.hasAttribute('data-tone')).to.equal(false);
+      expect(button.getAttribute('aria-label')).to.equal(`Battery: ${level === null ? 'unknown' : `${level}%`}. More information`);
+      expect(getComputedStyle(button).backgroundColor).to.equal('rgba(0, 0, 0, 0)');
     });
   }
 
@@ -197,14 +223,14 @@ describe('material-plant-card', () => {
     expect(query(await mount(cfg({ battery_sensor: 'sensor.missing' })), '.battery')).to.equal(null);
   });
 
-  it('uses configured battery thresholds', async () => {
+  it('uses the configured battery warning level and ignores battery_ok_level', async () => {
     const hass = fakeHass();
     const card = await mount(cfg({ battery_sensor: BATTERY, battery_warn_level: 35, battery_ok_level: 60 }), hass);
-    for (const [value, tone] of [['34', 'low'], ['35', 'warn'], ['59', 'warn'], ['60', 'ok']]) {
+    for (const [value, tone] of [['34', 'low'], ['35', 'ok'], ['59', 'ok'], ['60', 'ok']]) {
       assign(card, { ...hass, states: { ...hass.states, [BATTERY]: state(value) } });
       await settle(card);
-      expect(query(card, '.battery').getAttribute('data-tone'), `battery ${value}%`).to.equal(tone);
-      expect(query(card, '.battery').textContent!.trim()).to.equal(`${value}%`);
+      expect(query(card, '.battery mpl-battery'), `battery ${value}%`).to.have.property('tone', tone);
+      expect(query(card, '.battery mpl-battery')).to.have.property('level', Number(value));
     }
   });
 
@@ -212,10 +238,13 @@ describe('material-plant-card', () => {
     const hass = fakeHass({ moisture: info.moisture, temperature: { min: 0, max: 40, current: 20 } });
     const card = await mount(cfg({ battery_sensor: BATTERY, show_bars: ['moisture', 'temperature'] }), hass);
     const events: CustomEvent<{ entityId: string }>[] = [];
+    const clicks = sinon.spy();
+    card.addEventListener('click', clicks);
     card.addEventListener('hass-more-info', (event) => events.push(event as CustomEvent<{ entityId: string }>));
     query(card, '.image-btn').click();
     query(card, '.text-btn').click();
     query(card, '.battery').click();
+    expect(clicks.callCount).to.equal(2);
     card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn').forEach((button) => button.click());
     expect(events.map((event) => event.detail.entityId)).to.deep.equal([
       ENTITY, ENTITY, BATTERY, 'sensor.moisture', ENTITY,
@@ -513,16 +542,15 @@ describe('material-plant-card', () => {
     expect(radii.filter((radius, index) => radius > radii[(index + 179) % 180] && radius > radii[(index + 1) % 180])).to.have.length(9);
   });
 
-  for (const [count, columns] of [[7, 4], [8, 4], [9, 5], [10, 5]]) {
-    it(`balances ${count} gauges into ${columns}+${count - columns} rows at 327px`, async () => {
-      const container = await fixture<HTMLDivElement>(html`<div style="width:327px"><material-plant-card></material-plant-card></div>`);
+  for (const [width, count, columns] of [[327, 7, 4], [327, 8, 4], [327, 9, 5], [327, 10, 5], [240, 6, 3], [240, 5, 3]]) {
+    it(`balances ${count} gauges into ${columns}+${count - columns} rows at ${width}px`, async () => {
+      const container = await fixture<HTMLDivElement>(html`<div style=${`width:${width}px`}><material-plant-card></material-plant-card></div>`);
       const card = container.firstElementChild as MaterialPlantCard;
       const keys = Array.from({ length: count }, (_, index) => `measurement_${index}`);
       const data: PlantInfo = Object.fromEntries(keys.map((key) => [key, { min: 10, max: 50, current: 25 }]));
       card.setConfig(cfg({ show_bars: ['missing', ...keys] }));
       assign(card, fakeHass(data));
-      await settle(card);
-      for (const gauge of gauges(card)) await gauge.updateComplete;
+      await settleLayout(card);
       const buttons = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')];
       expect(buttons).to.have.length(count);
       const tops = buttons.map((button) => button.offsetTop);
@@ -531,15 +559,29 @@ describe('material-plant-card', () => {
       expect(tops.filter((top) => top === rows[0])).to.have.length(columns);
       expect(tops.filter((top) => top === rows[1])).to.have.length(count - columns);
       expect(query(card, '.gauges').style.getPropertyValue('--mpl-cols')).to.equal(String(columns));
+      const bounds = query(card, '.gauges').getBoundingClientRect();
+      const secondRow = buttons.filter((button) => button.offsetTop === rows[1]);
+      const leftGap = secondRow[0].getBoundingClientRect().left - bounds.left;
+      const rightGap = bounds.right - secondRow[secondRow.length - 1].getBoundingClientRect().right;
+      expect(leftGap).to.be.closeTo(rightGap, 2);
     });
   }
 
-  it('keeps all six gauges within a 240px container', async () => {
-    const container = await fixture<HTMLDivElement>(html`<div style="width:240px"><material-plant-card></material-plant-card></div>`);
+  it('rebalances six gauges from one row to 3/3 when resized from 327px to 240px', async () => {
+    const container = await fixture<HTMLDivElement>(html`<div style="width:327px"><material-plant-card></material-plant-card></div>`);
     const card = container.firstElementChild as MaterialPlantCard;
     card.setConfig(cfg());
     assign(card, fakeHass());
-    await settle(card);
+    await settleLayout(card);
+    const buttons = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')];
+    expect(new Set(buttons.map((button) => button.offsetTop)).size).to.equal(1);
+    container.style.width = '240px';
+    await settleLayout(card);
+    const tops = buttons.map((button) => button.offsetTop);
+    const rows = [...new Set(tops)];
+    expect(rows).to.have.length(2);
+    expect(tops.filter((top) => top === rows[0])).to.have.length(3);
+    expect(tops.filter((top) => top === rows[1])).to.have.length(3);
     expect(gauges(card)).to.have.length(6);
     for (const gauge of gauges(card)) {
       await gauge.updateComplete;
@@ -552,7 +594,7 @@ describe('material-plant-card', () => {
     const card = container.firstElementChild as MaterialPlantCard;
     card.setConfig(cfg());
     assign(card, fakeHass());
-    await settle(card);
+    await settleLayout(card);
     for (const gauge of gauges(card)) {
       await (gauge as HTMLElement & { updateComplete: Promise<boolean> }).updateComplete;
     }
