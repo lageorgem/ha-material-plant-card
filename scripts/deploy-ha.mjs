@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir, networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:http';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { setTimeout as delay } from 'node:timers/promises';
 
 if (typeof globalThis.WebSocket !== 'function') {
@@ -14,7 +14,6 @@ if (typeof globalThis.fetch !== 'function') {
   process.exit(1);
 }
 
-const filename = 'material-plant-card.js';
 const resourcePrefix = '/local/material-plant-card/';
 const sha256 = (body) => createHash('sha256').update(body).digest('hex');
 
@@ -88,16 +87,13 @@ async function remoteMatches(origin, headers, resourcePath, hash, timeout = 5000
 async function upload(origin, token, bundle, hash, targetFilename) {
   const resourcePath = `${resourcePrefix}${targetFilename}`;
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
-  if (await remoteMatches(origin, headers, resourcePath, hash)) {
-    return 'already present, verified';
-  }
   const host = lanHost();
   const port = Number(process.env.DEPLOY_PORT ?? 8799);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('DEPLOY_PORT must be an integer between 1 and 65535.');
   }
   const server = createServer((request, response) => {
-    if (request.url !== `/${filename}` || !['GET', 'HEAD'].includes(request.method)) {
+    if (request.url !== `/${targetFilename}` || !['GET', 'HEAD'].includes(request.method)) {
       response.writeHead(404).end();
       return;
     }
@@ -118,10 +114,10 @@ async function upload(origin, token, bundle, hash, targetFilename) {
       headers,
       redirect: 'error',
       body: JSON.stringify({
-        url: `http://${host}:${port}/${filename}`,
+        url: `http://${host}:${port}/${targetFilename}`,
         subdir: 'material-plant-card',
         filename: targetFilename,
-        overwrite: true,
+        overwrite: false,
       }),
       signal: AbortSignal.timeout(30000),
     });
@@ -210,7 +206,7 @@ try {
   const { origin, token } = await loadSettings();
   const bundle = await readFile(new URL('../dist/material-plant-card.js', import.meta.url));
   const hash = sha256(bundle);
-  const targetFilename = `material-plant-card-${hash.slice(0, 8)}.js`;
+  const targetFilename = `material-plant-card-${hash.slice(0, 8)}-${randomBytes(8).toString('hex')}.js`;
   // Activation is reachable only after the remote bytes match the full hash.
   console.log(await upload(origin, token, bundle, hash, targetFilename));
   const url = `${resourcePrefix}${targetFilename}`;
