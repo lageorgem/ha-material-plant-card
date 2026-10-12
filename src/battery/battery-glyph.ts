@@ -3,6 +3,21 @@ import { property } from 'lit/decorators.js';
 
 let nextBatteryId = 0;
 
+/** WCAG contrast ratio for two opaque six-digit sRGB hex colors. */
+export function contrastRatio(hexA: string, hexB: string): number {
+  const luminance = (hex: string): number => {
+    if (!/^#[\da-f]{6}$/i.test(hex)) throw new TypeError('Expected a six-digit hex color');
+    const channels = [1, 3, 5].map(offset => {
+      const srgb = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+      return srgb <= 0.04045 ? srgb / 12.92 : ((srgb + 0.055) / 1.055) ** 2.4;
+    });
+    return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+  };
+  const a = luminance(hexA);
+  const b = luminance(hexB);
+  return (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+}
+
 /** Decorative battery glyph; the enclosing control owns its accessible name. */
 export class MplBattery extends LitElement {
   @property({ type: Number }) level: number | null = null;
@@ -34,9 +49,9 @@ export class MplBattery extends LitElement {
             </clipPath>
           </defs>
           <rect class="track" x="0.5" y="0.5" width="26" height="14" rx="4"
-            fill="currentColor" opacity="0.35"></rect>
+            fill="currentColor"></rect>
           <rect class="nub" x="27.5" y="4.5" width="2" height="6" rx="1"
-            fill="currentColor" opacity=${level === 100 ? '1' : '0.35'}></rect>
+            fill="currentColor" opacity=${level === 100 ? '1' : 'var(--mpl-battery-track-opacity)'}></rect>
           ${level !== null && level > 0 ? svg`
             <rect class="level-fill" x="0.5" y="0.5" width=${fillWidth} height="14"
               fill="currentColor" clip-path=${`url(#${bodyId})`}></rect>
@@ -62,6 +77,7 @@ export class MplBattery extends LitElement {
       --mpl-battery-height: 15px;
       --mpl-battery-number-size: 10px;
       --mpl-battery-number-weight: 700;
+      --mpl-battery-track-opacity: 0.3;
       display: inline-block;
       width: var(--mpl-battery-width);
       height: var(--mpl-battery-height);
@@ -86,6 +102,9 @@ export class MplBattery extends LitElement {
     }
     .number-filled {
       fill: var(--mpl-surface-bg);
+    }
+    .track {
+      opacity: var(--mpl-battery-track-opacity);
     }
   `;
 }

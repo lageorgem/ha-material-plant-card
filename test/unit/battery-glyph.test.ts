@@ -1,5 +1,14 @@
 import { fixture, html, expect } from '@open-wc/testing';
-import { MplBattery } from '../../src/battery/battery-glyph';
+import { MplBattery, contrastRatio } from '../../src/battery/battery-glyph';
+
+function blend(background: string, foreground: string, opacity: number): string {
+  const channels = [1, 3, 5].map(offset => {
+    const bg = parseInt(background.slice(offset, offset + 2), 16);
+    const fg = parseInt(foreground.slice(offset, offset + 2), 16);
+    return Math.round(bg * (1 - opacity) + fg * opacity).toString(16).padStart(2, '0');
+  });
+  return `#${channels.join('')}`;
+}
 
 async function mount(level: number | null = null, tone: MplBattery['tone'] = 'unknown') {
   return fixture<MplBattery>(html`<mpl-battery .level=${level} .tone=${tone}></mpl-battery>`);
@@ -36,7 +45,39 @@ describe('mpl-battery', () => {
         expect(text.getAttribute('dominant-baseline')).to.equal('central');
         expect(text.getAttribute('clip-path')).to.match(/^url\(#.+\)$/);
       }
-      expect(root.querySelector('.nub')!.getAttribute('opacity')).to.equal(level === 100 ? '1' : '0.35');
+      expect(Number(getComputedStyle(root.querySelector('.nub')!).opacity)).to.equal(level === 100 ? 1 : 0.3);
+    });
+  }
+
+  it('calculates WCAG contrast independently of color order', () => {
+    expect(contrastRatio('#000000', '#ffffff')).to.equal(21);
+    expect(contrastRatio('#ffffff', '#000000')).to.equal(21);
+    expect(contrastRatio('#201b13', '#201b13')).to.equal(1);
+    expect(() => contrastRatio('invalid', '#ffffff')).to.throw(TypeError);
+  });
+
+  for (const [tone, color] of [['ok', '#d2c4b4'], ['low', '#ffb4ab']] as const) {
+    it(`keeps ${tone} digits above 4.5:1 on both track and fill at every level`, async () => {
+      const background = '#201b13';
+      const el = await mount(0, tone);
+      el.style.setProperty('--mpl-surface-bg', background);
+      el.style.setProperty('--mpl-on-surface-variant', '#d2c4b4');
+      el.style.setProperty('--mpl-error', '#ffb4ab');
+      const opacity = Number(getComputedStyle(el).getPropertyValue('--mpl-battery-track-opacity'));
+      expect(opacity).to.equal(0.3);
+      expect(contrastRatio(color, blend(background, color, opacity))).to.be.at.least(4.5);
+      expect(contrastRatio(background, color)).to.be.at.least(4.5);
+      expect(contrastRatio(color, blend(background, color, opacity + 0.05))).to.be.lessThan(4.5);
+
+      for (let level = 0; level <= 100; level++) {
+        el.level = level;
+        await el.updateComplete;
+        const root = el.shadowRoot!;
+        expect(Number(getComputedStyle(root.querySelector('.track')!).opacity)).to.equal(opacity);
+        expect(Number(getComputedStyle(root.querySelector('.nub')!).opacity)).to.equal(level === 100 ? 1 : opacity);
+        expect(getComputedStyle(root.querySelector('.number-filled')!).fill).to.equal('rgb(32, 27, 19)');
+        expect(getComputedStyle(root.querySelector('text:not(.number-filled)')!).fill).to.equal(getComputedStyle(el).color);
+      }
     });
   }
 
