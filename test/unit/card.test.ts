@@ -37,7 +37,8 @@ async function settle(card: MaterialPlantCard): Promise<void> {
 }
 async function settleLayout(card: MaterialPlantCard): Promise<void> {
   for (let frame = 0; frame < 3; frame++) {
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    // Observer delivery and the deferred capacity write run in separate frames.
+    await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
     await settle(card);
   }
   for (const gauge of gauges(card)) await gauge.updateComplete;

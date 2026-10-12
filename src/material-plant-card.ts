@@ -38,9 +38,9 @@ export class MaterialPlantCard extends LitElement {
   @state() private _config?: MaterialPlantCardConfig;
   @state() private _info?: PlantInfo;
   @state() private _failedSrc?: string;
-  @state() private _gaugesWidth = 0;
+  @state() private _gaugeCapacity = 6;
   private _gaugesObserver?: ResizeObserver;
-  private _observedGauges?: Element;
+  private _gaugesFrame?: number;
   private _imageSrc?: string;
   private _lastFetch = -Infinity;
   private _request = 0;
@@ -122,7 +122,8 @@ export class MaterialPlantCard extends LitElement {
     super.disconnectedCallback();
     this._gaugesObserver?.disconnect();
     this._gaugesObserver = undefined;
-    this._observedGauges = undefined;
+    if (this._gaugesFrame !== undefined) cancelAnimationFrame(this._gaugesFrame);
+    this._gaugesFrame = undefined;
     if (this._timer !== undefined) clearTimeout(this._timer);
     this._timer = undefined;
     // A cancelled trailing fetch or invalidated response still needs replacement.
@@ -131,36 +132,28 @@ export class MaterialPlantCard extends LitElement {
     this._request++;
   }
 
-  private get _gaugeCapacity(): number {
-    return this._gaugesWidth > 0 ? Math.max(1, Math.floor((this._gaugesWidth + 4) / 48)) : 6;
-  }
-
-  protected updated(): void {
-    // Metadata/config changes can add, remove or replace the gauges container.
-    this._observeGauges();
-  }
-
   private _observeGauges(): void {
-    if (!this.isConnected) return;
-    const container = this.renderRoot.querySelector('.gauges') ?? undefined;
-    if (container === this._observedGauges) return;
-    this._gaugesObserver?.disconnect();
-    this._observedGauges = container;
-    if (!container) return;
-    this._gaugesObserver ??= new ResizeObserver((entries) => {
+    if (!this.isConnected || this._gaugesObserver) return;
+    this._gaugesObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        if (!this.isConnected || entry.target !== this._observedGauges) continue;
-        const width = entry.contentRect.width;
-        const capacity = width > 0 ? Math.max(1, Math.floor((width + 4) / 48)) : 6;
-        // A new row changes height, not capacity: don't trigger a feedback render.
-        if (capacity !== this._gaugeCapacity) this._gaugesWidth = width;
+        if (!this.isConnected || entry.target !== this) continue;
+        if (this._gaugesFrame !== undefined) cancelAnimationFrame(this._gaugesFrame);
+        this._gaugesFrame = undefined;
+        const innerWidth = entry.contentRect.width - 32;
+        const capacity = Math.max(1, Math.floor((innerWidth + 4) / 48));
+        if (capacity === this._gaugeCapacity) continue;
+        // Host height can change with the rows. Defer writes beyond observer delivery.
+        this._gaugesFrame = requestAnimationFrame(() => {
+          this._gaugesFrame = undefined;
+          if (this.isConnected && capacity !== this._gaugeCapacity) this._gaugeCapacity = capacity;
+        });
       }
     });
-    this._gaugesObserver.observe(container);
+    this._gaugesObserver.observe(this);
   }
 
   protected shouldUpdate(changed: PropertyValues): boolean {
-    if (changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugesWidth')) return true;
+    if (changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugeCapacity')) return true;
     if (!this._config || !this.hass || !changed.has('hass')) return false;
     const old = changed.get('hass') as HomeAssistant | undefined;
     if (!old) return true;
