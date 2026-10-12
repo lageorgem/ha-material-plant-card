@@ -40,6 +40,7 @@ export class MaterialPlantCard extends LitElement {
   private _imageSrc?: string;
   private _lastFetch = -Infinity;
   private _request = 0;
+  private _inFlight?: number;
   private _timer?: ReturnType<typeof setTimeout>;
   private _pending = false;
 
@@ -71,10 +72,10 @@ export class MaterialPlantCard extends LitElement {
   }
 
   private _queueFetch(): void {
-    if (!this.hass || !this._config) return;
     // New demand supersedes in-flight responses, including during the throttle window.
     this._request++;
     this._pending = true;
+    if (!this.isConnected || !this.hass || !this._config) return;
     const wait = Math.max(0, REFRESH_INTERVAL - (Date.now() - this._lastFetch));
     if (wait === 0) {
       if (this._timer !== undefined) clearTimeout(this._timer);
@@ -91,10 +92,11 @@ export class MaterialPlantCard extends LitElement {
   private async _fetchInfo(): Promise<void> {
     const hass = this.hass;
     const entity = this._config?.entity;
-    if (!hass || !entity) return;
+    if (!this.isConnected || !hass || !entity) return;
     this._pending = false;
     this._lastFetch = Date.now();
     const request = ++this._request;
+    this._inFlight = request;
     try {
       const response = await hass.callWS<{ result: PlantInfo }>({ type: 'plant/get_info', entity_id: entity });
       if (request === this._request && entity === this._config?.entity && response?.result) {
@@ -102,6 +104,8 @@ export class MaterialPlantCard extends LitElement {
       }
     } catch {
       // Integration can be starting up/offline. Preserve last good metadata and live readings.
+    } finally {
+      if (this._inFlight === request) this._inFlight = undefined;
     }
   }
 
@@ -113,8 +117,10 @@ export class MaterialPlantCard extends LitElement {
     super.disconnectedCallback();
     if (this._timer !== undefined) clearTimeout(this._timer);
     this._timer = undefined;
+    // A cancelled trailing fetch or invalidated response still needs replacement.
+    this._pending ||= this._inFlight !== undefined;
+    this._inFlight = undefined;
     this._request++;
-    this._pending = true;
   }
 
   protected shouldUpdate(changed: PropertyValues): boolean {

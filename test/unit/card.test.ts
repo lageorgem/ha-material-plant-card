@@ -272,6 +272,107 @@ describe('material-plant-card', () => {
     card.remove();
     await clock.tickAsync(5000);
     expect(hass.callWS.callCount).to.equal(1);
+    expect(clock.countTimers()).to.equal(0);
+    document.body.append(card);
+    await settle(card);
+    expect(hass.callWS.callCount).to.equal(2);
+    expect(gauges(card)).to.have.length(6);
+    card.remove();
+  });
+
+  it('defers initial detached configuration and hass until connected', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass();
+    const card = new MaterialPlantCard();
+    card.setConfig(cfg());
+    assign(card, hass);
+    expect(hass.callWS.callCount).to.equal(0);
+    expect(clock.countTimers()).to.equal(0);
+    document.body.append(card);
+    await settle(card);
+    expect(hass.callWS.callCount).to.equal(1);
+    expect(gauges(card)).to.have.length(6);
+    card.remove();
+  });
+
+  for (const elapsed of [1000, 5000]) {
+    it(`defers detached timestamp demand after ${elapsed}ms and respects the throttle on reconnect`, async () => {
+      const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      const hass = fakeHass();
+      const card = await mount(cfg(), hass);
+      card.remove();
+      await clock.tickAsync(elapsed);
+      for (const timestamp of ['1', '2']) {
+        assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, timestamp) } });
+      }
+      expect(hass.callWS.callCount).to.equal(1);
+      expect(clock.countTimers()).to.equal(0);
+      document.body.append(card);
+      expect(hass.callWS.callCount).to.equal(elapsed < 5000 ? 1 : 2);
+      await clock.tickAsync(5000 - elapsed);
+      await settle(card);
+      expect(hass.callWS.callCount).to.equal(2);
+      expect(clock.countTimers()).to.equal(0);
+      expect(gauges(card)).to.have.length(6);
+      card.remove();
+    });
+  }
+
+  it('defers detached entity changes and fetches only the latest configuration on reconnect', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass();
+    hass.states['plant.other'] = state();
+    const card = await mount(cfg(), hass);
+    card.remove();
+    card.setConfig(cfg({ entity: 'plant.other' }));
+    expect(hass.callWS.callCount).to.equal(1);
+    expect(clock.countTimers()).to.equal(0);
+    await clock.tickAsync(5000);
+    card.setConfig(cfg());
+    expect(hass.callWS.callCount).to.equal(1);
+    expect(clock.countTimers()).to.equal(0);
+    document.body.append(card);
+    await settle(card);
+    expect(hass.callWS.callCount).to.equal(2);
+    expect(hass.callWS.lastCall.args).to.deep.equal([{ type: 'plant/get_info', entity_id: ENTITY }]);
+    expect(gauges(card)).to.have.length(6);
+    card.remove();
+  });
+
+  it('reconnects without refetching when there is no pending demand', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass();
+    const card = await mount(cfg(), hass);
+    card.remove();
+    assign(card, { ...hass, states: { ...hass.states, 'sensor.moisture': state('30') } });
+    card.setConfig(cfg({ name: 'Moved plant' }));
+    await clock.tickAsync(5000);
+    document.body.append(card);
+    await settle(card);
+    expect(hass.callWS.callCount).to.equal(1);
+    expect(clock.countTimers()).to.equal(0);
+    expect(gauges(card)).to.have.length(6);
+    expect(gauges(card)[0]).to.have.property('value', '30%');
+    card.remove();
+  });
+
+  it('retries an invalidated in-flight request on reconnect', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass();
+    let resolveOld!: (response: { result: PlantInfo }) => void;
+    hass.callWS.onFirstCall().returns(new Promise((resolve) => { resolveOld = resolve; }));
+    const card = await mount(cfg(), hass);
+    card.remove();
+    resolveOld({ result: { temperature: info.temperature } });
+    await settle(card);
+    expect(gauges(card)).to.have.length(0);
+    expect(clock.countTimers()).to.equal(0);
+    await clock.tickAsync(5000);
+    document.body.append(card);
+    await settle(card);
+    expect(hass.callWS.callCount).to.equal(2);
+    expect(gauges(card)).to.have.length(6);
+    card.remove();
   });
 
   it('ignores unrelated entity changes but renders tracked plant, battery and sensor changes', async () => {
