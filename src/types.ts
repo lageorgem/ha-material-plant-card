@@ -32,6 +32,8 @@ export interface MaterialPlantCardConfig {
   hide_image?: boolean;
   hide_units?: boolean;
   hide_history?: boolean;
+  // Full-mode range window; defaults to '24h'. Cumulative metrics always use daily totals.
+  history_period?: '24h' | '7d';
   image?: string;
   battery_sensor?: string;
   // Battery turns red below this level; defaults to 10.

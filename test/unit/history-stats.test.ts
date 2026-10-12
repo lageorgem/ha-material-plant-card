@@ -1,6 +1,7 @@
 import { expect } from '@open-wc/testing';
 import {
-  aggregateStatistics, fetch24hStats, withCurrent, type StatRow,
+  aggregateDailyTotals, aggregateStatistics, fetchHistoryStats, withCurrent,
+  type DailyRow, type StatRow,
 } from '../../src/data/history-stats';
 
 describe('aggregateStatistics', () => {
@@ -54,7 +55,38 @@ describe('withCurrent', () => {
   });
 });
 
-describe('fetch24hStats', () => {
+describe('aggregateDailyTotals', () => {
+  const now = Date.parse('2026-10-12T12:34:56.789Z');
+
+  it('aggregates the complete busu days, excluding the current partial day', () => {
+    const rows = [9.71, 10.23, 8.23, 7.79, 8.68, 9.12].map((change, index) => ({
+      start: now - (7 - index) * 86400000,
+      end: now - (6 - index) * 86400000,
+      change,
+    }));
+    const stats = aggregateDailyTotals([...rows, { end: now + 86400000, change: 0.70 }], now);
+    expect(stats?.min).to.equal(7.79);
+    expect(stats?.max).to.equal(10.23);
+    expect(stats?.mean).to.be.closeTo(8.96, 0.001);
+  });
+
+  it('requires finite change and end, accepts the exact end boundary and zero', () => {
+    const invalid: DailyRow[] = [];
+    for (const change of [null, undefined, NaN, Infinity, -Infinity]) {
+      invalid.push({ end: now, change });
+    }
+    for (const end of [undefined, NaN, Infinity, -Infinity, now + 1]) {
+      invalid.push({ end, change: 100 });
+    }
+    expect(aggregateDailyTotals([...invalid, { end: now, change: 0 }], now))
+      .to.deep.equal({ min: 0, max: 0, mean: 0 });
+    expect(aggregateDailyTotals(invalid, now)).to.equal(null);
+    expect(aggregateDailyTotals([], now)).to.equal(null);
+    expect(aggregateDailyTotals(undefined, now)).to.equal(null);
+  });
+});
+
+describe('fetchHistoryStats', () => {
   const now = Date.parse('2026-10-12T12:34:56.789Z');
 
   it('sends one exact request with deduplicated ids and aggregates the direct result', async () => {
@@ -80,10 +112,11 @@ describe('fetch24hStats', () => {
       'sensor.moisture', 'sensor.temperature', 'sensor.moisture', 'sensor.dli',
       'sensor.empty', 'sensor.invalid', 'sensor.missing',
     ];
-    expect(await fetch24hStats(hass, ids, now)).to.deep.equal({
+    expect(await fetchHistoryStats(hass, { range: ids, dailyTotals: [], window: '24h' }, now))
+      .to.deep.equal({ range: {
       'sensor.moisture': { min: 10, max: 18, mean: 13 },
       'sensor.temperature': { min: 20, max: 24, mean: 22 },
-    });
+    }, dailyTotals: {}, failed: false });
     expect(messages).to.deep.equal([{
       type: 'recorder/statistics_during_period',
       start_time: new Date(now - 86400000).toISOString(),
@@ -97,7 +130,7 @@ describe('fetch24hStats', () => {
     expect(ids).to.have.length(7);
   });
 
-  it('makes no call for an empty sensor list', async () => {
+  it('makes no call for empty lists', async () => {
     let calls = 0;
     const hass = {
       callWS: async <T>(): Promise<T> => {
@@ -105,11 +138,12 @@ describe('fetch24hStats', () => {
         throw new Error('Unexpected call');
       },
     };
-    expect(await fetch24hStats(hass, [], now)).to.deep.equal({});
+    expect(await fetchHistoryStats(hass, { range: [], dailyTotals: [], window: '7d' }, now))
+      .to.deep.equal({ range: {}, dailyTotals: {}, failed: false });
     expect(calls).to.equal(0);
   });
 
-  it('returns an empty map on rejection without throwing or retrying', async () => {
+  it('returns empty groups on rejection without throwing or retrying', async () => {
     let calls = 0;
     const hass = {
       callWS: async <T>(): Promise<T> => {
@@ -117,7 +151,98 @@ describe('fetch24hStats', () => {
         throw new Error('Recorder unavailable');
       },
     };
-    expect(await fetch24hStats(hass, ['sensor.moisture'], now)).to.deep.equal({});
-    expect(calls).to.equal(1);
+    expect(await fetchHistoryStats(hass, {
+      range: ['sensor.moisture'], dailyTotals: ['sensor.dli'], window: '24h',
+    }, now)).to.deep.equal({ range: {}, dailyTotals: {}, failed: true });
+    expect(calls).to.equal(2);
+  });
+
+  it('sends exact 7d and daily requests in parallel and deduplicates each group', async () => {
+    const messages: Record<string, unknown>[] = [];
+    const resolvers: Array<(value: unknown) => void> = [];
+    const hass = {
+      callWS: <T>(message: Record<string, unknown>): Promise<T> => {
+        messages.push(message);
+        return new Promise<T>((resolve) => resolvers.push((value) => resolve(value as T)));
+      },
+    };
+    const request = {
+      range: ['sensor.shared', 'sensor.shared'],
+      dailyTotals: ['sensor.shared', 'sensor.shared', 'sensor.empty', 'sensor.missing', 'sensor.partial'],
+      window: '7d' as const,
+    };
+    const pending = fetchHistoryStats(hass, request, now);
+    const start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    start.setDate(start.getDate() - 7);
+    expect(messages).to.deep.equal([{
+      type: 'recorder/statistics_during_period',
+      start_time: new Date(now - 7 * 86400000).toISOString(),
+      statistic_ids: ['sensor.shared'], period: 'hour', types: ['min', 'max', 'mean'],
+    }, {
+      type: 'recorder/statistics_during_period', start_time: start.toISOString(),
+      statistic_ids: ['sensor.shared', 'sensor.empty', 'sensor.missing', 'sensor.partial'],
+      period: 'day', types: ['change'],
+    }]);
+    expect(resolvers).to.have.length(2);
+    resolvers[0]({ 'sensor.shared': [{ min: 1, max: 3, mean: 2 }] });
+    resolvers[1]({
+      'sensor.shared': [{ end: now, change: 9 }, { end: now - 1, change: 7 }],
+      'sensor.empty': [], 'sensor.partial': [{ end: now + 1, change: 0.7 }],
+      'sensor.unrequested': [{ end: now, change: 100 }],
+    });
+    expect(await pending).to.deep.equal({
+      range: { 'sensor.shared': { min: 1, max: 3, mean: 2 } },
+      dailyTotals: { 'sensor.shared': { min: 7, max: 9, mean: 8 } }, failed: false,
+    });
+    expect(request.range).to.have.length(2);
+    expect(request.dailyTotals).to.have.length(5);
+  });
+
+  it('makes only the daily call when the range list is empty', async () => {
+    const messages: Record<string, unknown>[] = [];
+    const hass = {
+      callWS: async <T>(message: Record<string, unknown>): Promise<T> => {
+        messages.push(message);
+        return { 'sensor.dli': [{ end: now, change: 9 }] } as T;
+      },
+    };
+    expect(await fetchHistoryStats(hass, {
+      range: [], dailyTotals: ['sensor.dli'], window: '24h',
+    }, now)).to.deep.equal({
+      range: {}, dailyTotals: { 'sensor.dli': { min: 9, max: 9, mean: 9 } }, failed: false,
+    });
+    expect(messages).to.have.length(1);
+    expect(messages[0].period).to.equal('day');
+  });
+
+  for (const failedPeriod of ['hour', 'day']) {
+    it(`preserves the other group's result when ${failedPeriod} rejects`, async () => {
+      const messages: Record<string, unknown>[] = [];
+      const hass = {
+        callWS: async <T>(message: Record<string, unknown>): Promise<T> => {
+          messages.push(message);
+          if (message.period === failedPeriod) throw new Error('Recorder unavailable');
+          return (message.period === 'hour'
+            ? { 'sensor.moisture': [{ min: 1, max: 3, mean: 2 }] }
+            : { 'sensor.dli': [{ end: now, change: 9 }] }) as T;
+        },
+      };
+      expect(await fetchHistoryStats(hass, {
+        range: ['sensor.moisture'], dailyTotals: ['sensor.dli'], window: '24h',
+      }, now)).to.deep.equal({
+        range: failedPeriod === 'hour' ? {} : { 'sensor.moisture': { min: 1, max: 3, mean: 2 } },
+        dailyTotals: failedPeriod === 'day' ? {} : { 'sensor.dli': { min: 9, max: 9, mean: 9 } },
+        failed: true,
+      });
+      expect(messages).to.have.length(2);
+    });
+  }
+
+  it('contains synchronous transport errors too', async () => {
+    const hass = { callWS: <T>(): Promise<T> => { throw new Error('Disconnected'); } };
+    expect(await fetchHistoryStats(hass, {
+      range: ['sensor.moisture'], dailyTotals: ['sensor.dli'], window: '24h',
+    }, now)).to.deep.equal({ range: {}, dailyTotals: {}, failed: true });
   });
 });

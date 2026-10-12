@@ -54,6 +54,7 @@ const labels: Readonly<Record<string, string>> = {
   show_bars: 'Gauges',
   hide_units: 'Hide units',
   hide_history: 'Hide 24-hour history',
+  history_period: 'History window',
   problem_source: 'Problem source',
   problem_sensors: 'Problem sensors',
   hide_species: 'Hide species',
@@ -65,6 +66,7 @@ const labels: Readonly<Record<string, string>> = {
 const helpers: Readonly<Record<string, string>> = {
   hide_units: 'Hides units next to values.',
   hide_history: 'Full mode only: skips the last-24-hours range and average.',
+  history_period: 'Full mode. DLI is a daily total, so it always shows daily totals for the last 7 days.',
   show_bars: `Default: ${DEFAULT_GAUGES.map((key) => MEASUREMENT_LABELS[key]).join(', ')}.`,
   problem_source: "Plant monitor follows the integration's problem triggers; Gauges flags any out-of-range value.",
   problem_sensors: 'Leave empty to allow every sensor.',
@@ -91,6 +93,13 @@ const schema: HaFormSchema[] = [
       } } },
       { name: 'hide_units', selector: { boolean: {} } },
       { name: 'hide_history', selector: { boolean: {} } },
+      { name: 'history_period', selector: { select: {
+        mode: 'dropdown',
+        options: [
+          { value: '24h', label: 'Last 24 hours' },
+          { value: '7d', label: 'Last 7 days' },
+        ],
+      } } },
     ],
   },
   {

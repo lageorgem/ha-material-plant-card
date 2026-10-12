@@ -22,7 +22,7 @@ describe('configForm', () => {
     expect(fields().map((item) => item.name).sort()).to.deep.equal([
       'entity', 'name', 'display_type', 'show_bars', 'hide_species', 'hide_image',
       'hide_units', 'hide_history', 'image', 'battery_sensor', 'battery_warn_level',
-      'problem_source', 'problem_sensors',
+      'problem_source', 'problem_sensors', 'history_period',
     ].sort());
   });
 
@@ -55,6 +55,8 @@ describe('configForm', () => {
       .to.equal(field('battery_warn_level'));
     expect(sections[0].schema?.find((item) => item.name === 'hide_history'))
       .to.equal(field('hide_history'));
+    expect(sections[0].schema?.find((item) => item.name === 'history_period'))
+      .to.equal(field('history_period'));
     expect(field('battery_warn_level').selector).to.deep.equal({
       number: { min: 0, max: 100, step: 1, mode: 'box', unit_of_measurement: '%' },
     });
@@ -80,6 +82,12 @@ describe('configForm', () => {
         { value: 'gauges', label: 'Gauges (any out-of-range value)' },
       ],
     } });
+    expect(field('history_period').selector).to.deep.equal({ select: {
+      mode: 'dropdown', options: [
+        { value: '24h', label: 'Last 24 hours' },
+        { value: '7d', label: 'Last 7 days' },
+      ],
+    } });
   });
 
   it('labels every field and leaves unknown names to HA', () => {
@@ -89,6 +97,7 @@ describe('configForm', () => {
     expect(configForm.computeLabel({ name: 'unknown' })).to.equal(undefined);
     expect(configForm.computeLabel(field('show_bars'))).to.equal('Gauges');
     expect(configForm.computeLabel(field('hide_history'))).to.equal('Hide 24-hour history');
+    expect(configForm.computeLabel(field('history_period'))).to.equal('History window');
     expect(configForm.computeLabel(field('problem_sensors'))).to.equal('Problem sensors');
     expect(configForm.computeLabel(field('battery_warn_level'))).to.equal('Battery low below');
   });
@@ -102,6 +111,9 @@ describe('configForm', () => {
     expect(configForm.computeHelper(field('hide_units'))).to.equal('Hides units next to values.');
     expect(configForm.computeHelper(field('hide_history'))).to.equal(
       'Full mode only: skips the last-24-hours range and average.',
+    );
+    expect(configForm.computeHelper(field('history_period'))).to.equal(
+      'Full mode. DLI is a daily total, so it always shows daily totals for the last 7 days.',
     );
     expect(configForm.computeHelper(field('battery_warn_level'))).to.equal(
       'Battery turns red below this level (default 10%).',
