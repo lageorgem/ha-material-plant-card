@@ -1,6 +1,6 @@
 # Material Plant Card
 
-A [Home Assistant](https://www.home-assistant.io/) Lovelace plant card built for **Material 3 Expressive**, with circular range gauges, plant problem summaries and a battery indicator. Requires [Olen's plant monitor integration](https://github.com/Olen/homeassistant-plant).
+A [Home Assistant](https://www.home-assistant.io/) Lovelace plant card built for **Material 3 Expressive**, with full-mode metric tiles and 24-hour ranges or compact circular gauges, plant problem summaries and a battery indicator. Requires [Olen's plant monitor integration](https://github.com/Olen/homeassistant-plant).
 
 Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha-material-thermostat-card), [Material Purifier Card](https://github.com/lageorgem/ha-material-purifier-card) and [Nerwyn's Material You theme](https://github.com/Nerwyn/material-you-theme), with Home Assistant theme fallbacks.
 
@@ -13,7 +13,7 @@ Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha
 
 [![Open your Home Assistant instance and open this repository inside the Home Assistant Community Store.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lageorgem&repository=ha-material-plant-card&category=plugin)
 
-<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/hero-dark.png" alt="Eleven plants on a dark dashboard using Material Plant Card" width="900">
+<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/hero-dark.png" alt="Eleven plants on a dark dashboard using Material Plant Card in compact mode" width="900">
 
 ## Table of contents
 
@@ -22,7 +22,9 @@ Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha
 - [Installation](#installation)
 - [Quick start](#quick-start)
 - [Card options](#card-options)
-- [Reading the gauges](#reading-the-gauges)
+- [Choosing a display mode](#choosing-a-display-mode)
+- [Reading full-mode tiles](#reading-full-mode-tiles)
+- [Reading compact-mode gauges](#reading-compact-mode-gauges)
 - [Choosing problem behaviour](#choosing-problem-behaviour)
 - [Battery indicator](#battery-indicator)
 - [Flower-card compatibility](#flower-card-compatibility)
@@ -35,24 +37,29 @@ Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha
 
 ## Highlights
 
-- Circular gauges with three zones: **too low / just right / too high**, a thick in-range band, thin outer zones, an active arc and a position dot.
+- Full mode (default, as in flower-card): a header and grouped Material 3 Expressive metric tiles with tonal icons, labels, large values with units and range bars with 24-hour history.
+- Compact mode: circular gauges with three zones: **too low / just right / too high**, a thick in-range band, thin outer zones, an active arc and a position dot.
 - Success colour for in-range readings, neutral for out-of-range advice, error colour for problems with bold, error-coloured value text.
 - Plant photo in an M3 Expressive cookie shape, with a placeholder for missing or broken images and a red error circle with a centred **!** when problems exist.
 - Name and species, or a problem summary such as **Moisture low · DLI low**.
 - Optional iOS-style battery glyph with the level number inside; red below 10% by default, otherwise neutral.
 - Width-aware, balanced gauge rows and two-line Material plain tooltips on long-press, hover or keyboard focus.
-- Full and compact displays; visual editor with **Gauges**, **Problems** and **Appearance** sections.
+- Shared photo and species header in both modes; visual editor with **Gauges**, **Problems** and **Appearance** sections.
 - Config-compatible with flower-card; migrate by changing the card type.
 
 ## Gallery
 
-The dashboard above shows eleven plants. This single-card view shows a plant needing attention:
+Full mode shows metric tiles and 24-hour ranges:
 
-<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/card-problem-dark.png" alt="Plant card with a problem summary and alert badge on the photo" width="327">
+<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/full-dark.png" alt="Full mode with metric tiles and 24-hour ranges" width="327">
 
-Long-press (or hover) a gauge for its tooltip with the metric, value and ideal range:
+The dashboard above shows eleven plants in compact mode. This compact single-card view shows a plant needing attention:
 
-<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/tooltip-dark.png" alt="Gauge tooltip showing Air humidity too high, 65.6 % with an ideal range of 20–60 %" width="327">
+<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/card-problem-dark.png" alt="Compact plant card with a problem summary and alert badge on the photo" width="327">
+
+In compact mode, long-press (or hover) a gauge for its tooltip with the metric, value and ideal range:
+
+<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/tooltip-dark.png" alt="Compact gauge tooltip showing Air humidity too high, 65.6 % with an ideal range of 20–60 %" width="327">
 
 Copy the [full-options example](examples/card.yaml) or [migration example](examples/migrate-from-flower-card.yaml). Release history: [CHANGELOG.md](CHANGELOG.md).
 
@@ -107,11 +114,12 @@ Defaults apply when keys are omitted. Only `type` and `entity` are required; eve
 | `type` | string, required | None | Custom card type. | `custom:material-plant-card` |
 | `entity` | string, required | None | Plant monitor entity; must start with `plant.`. | `plant.orhideea` |
 | `name` | string, optional | Plant friendly name, then entity ID | Override the title; an empty string also falls back. | `Orchid` |
-| `display_type` | `full` or `compact`, optional | `full` | Compact uses a smaller photo, hides species and hides gauge value text by default. | `compact` |
-| `show_bars` | string list, optional | `[moisture, conductivity, temperature, illuminance, humidity, dli]` | Gauges to display, in order. Duplicates are removed; `[]` hides all gauges. | `[moisture, temperature, dli]` |
-| `hide_species` | boolean, optional | `false` | Hide species in full display; does not hide problem summaries. Compact always hides species. | `true` |
+| `display_type` | `full` or `compact`, optional | `full` | Full shows grouped metric tiles with range bars and 24-hour history; compact shows circular gauges. Both use the same photo and species header. | `compact` |
+| `show_bars` | string list, optional | `[moisture, conductivity, temperature, illuminance, humidity, dli]` | Measurements to display, in order, as tiles or gauges. Duplicates are removed; `[]` hides all measurements. | `[moisture, temperature, dli]` |
+| `hide_species` | boolean, optional | `false` | Hide species in either mode; does not hide problem summaries. | `true` |
 | `hide_image` | boolean, optional | `false` | Hide the photo/placeholder and its alert badge. | `true` |
-| `hide_units` | boolean, optional | `false` in full; `true` in compact | Despite its compatibility name, hides the **entire value text** below gauges, not just unit suffixes. | `false` |
+| `hide_units` | boolean, optional | `false` in both modes | Full: hides the unit next to each value, keeping the number. Compact: hides the **entire value text** below gauges. | `true` |
+| `hide_history` | boolean, optional | `false` | Full only: disables fetching and displaying 24-hour min–max ranges and averages; keeps current values and ideal ranges. | `true` |
 | `image` | string, optional | Plant `entity_picture` | Picture URL or path override. A missing or broken image displays a placeholder. | `/local/plants/orchid.jpg` |
 | `battery_sensor` | string, optional | Unset; no indicator | Battery percentage sensor. Glyph is shown only if the entity exists. | `sensor.sh_5_battery` |
 | `battery_warn_level` | number, optional | `10` | Battery levels below this threshold use the error colour; otherwise neutral. | `10` |
@@ -126,7 +134,7 @@ Defaults apply when keys are omitted. Only `type` and `entity` are required; eve
 
 `show_bars` and `problem_sensors` use measurement keys, not sensor entity IDs:
 
-| Key | Label | In default gauges |
+| Key | Label | Displayed by default |
 | --- | --- | --- |
 | `moisture` | Moisture | Yes |
 | `conductivity` | Conductivity | Yes |
@@ -141,7 +149,27 @@ Defaults apply when keys are omitted. Only `type` and `entity` are required; eve
 
 Only measurements supplied by the integration are displayed. A measurement is also skipped if its referenced sensor entity is missing.
 
-## Reading the gauges
+## Choosing a display mode
+
+`display_type: full` is the default, as in flower-card. It shows the header followed by a grouped list of metric tiles. Choose compact for a shorter card with circular gauges:
+
+```yaml
+type: custom:material-plant-card
+entity: plant.orhideea
+display_type: compact
+```
+
+Both modes show the same photo size and species line unless `hide_image` or `hide_species` is enabled. Values and units are visible by default in both modes. See [Card options](#card-options) and the [examples](examples/card.yaml) for overrides.
+
+## Reading full-mode tiles
+
+Each tile has a tonal icon, metric label, large current value with its unit, and a horizontal range bar. Thin too-low/too-high zones surround a thick ideal band. A ringed dot marks the current value; a translucent pill spans the last 24 hours' minimum and maximum, and a small triangle marks the 24-hour average. The caption shows the ideal and historical ranges, for example **Ideal 20–60 · 24h 25–48**. The historical range includes the current reading if it extends beyond the recorded range.
+
+History comes from Home Assistant's recorder long-term statistics, using hourly minimum, maximum and mean data for the last 24 hours. Sensors need `state_class: measurement` and recorder statistics enabled; plant monitor measurement sensors provide that state class. DLI is a running total, so it shows no 24-hour min–max or average data. Unavailable statistics omit the history overlay and caption without hiding the current value or ideal range. History refreshes every **10 minutes**; `hide_history: true` disables it.
+
+Tap a tile to open sensor more-info. `hide_units: true` hides only the unit next to the tile's value, not the number. Range position uses the same scaling as [compact gauges](#reading-compact-mode-gauges), including logarithmic lux scaling.
+
+## Reading compact-mode gauges
 
 The thick middle band represents the plant's min/max range, including both boundaries. Thin bands on either side represent low and high readings. The coloured fill follows the track: thin in the too-low/too-high zones, thick in the just-right band, with the same gaps between zones. The active arc and dot show the current position; values beyond the gauge's visual extent are clamped at the ends.
 
@@ -208,15 +236,15 @@ to:
 type: custom:material-plant-card
 ```
 
-Keep the remaining configuration. `battery_ok_level`, `bars_per_row`, `show_care` and `extra_badges` are accepted and ignored: there is no OK battery threshold, no care panels or extra badges, and gauge layout is automatic. You can remove these ignored keys, as shown in the [before/after example](examples/migrate-from-flower-card.yaml). `hide_units` hides the complete value text. An omitted `battery_warn_level` defaults to 10%.
+Keep the remaining configuration. `battery_ok_level`, `bars_per_row`, `show_care` and `extra_badges` are accepted and ignored: there is no OK battery threshold, no care panels or extra badges, and gauge layout is automatic. You can remove these ignored keys, as shown in the [before/after example](examples/migrate-from-flower-card.yaml). Full remains the default display mode; choose `display_type: compact` for circular gauges. `hide_units` hides only units in full mode and complete gauge value text in compact mode. An omitted `battery_warn_level` defaults to 10%.
 
 This is an independent implementation inspired by flower-card; no code is shared.
 
 ## Layout & responsiveness
 
-The full card footprint remains **327 × 160 px** at 327 px width with six gauges, versus flower-card's **327 × 203 px**. This is a measured example, not a fixed height: gauge count, available width and content affect sizing.
+The compact card footprint is approximately **327 × 160 px** at 327 px width with six gauges, versus flower-card's **327 × 203 px**. Full mode is taller: approximately **446 px** with six metric tiles. These are measured examples, not fixed heights: measurement count, available width and content affect sizing.
 
-The card measures its width to decide how many gauges fit a row. If they do not fit one row, it balances them across rows, with the extra gauge on the first row and the last row centred. For two-row layouts: five gauges split **3/2**, six **3/3**, and seven **4/3**. At 327 px width, six gauges still fit one row. `bars_per_row` is ignored. Use `display_type: compact` for a 40 px photo instead of 56 px, no species line and hidden gauge value text by default. Set `hide_units: false` to restore values in compact display.
+In compact mode, the card measures its width to decide how many gauges fit a row. If they do not fit one row, it balances them across rows, with the extra gauge on the first row and the last row centred. For two-row layouts: five gauges split **3/2**, six **3/3**, and seven **4/3**. At 327 px width, six gauges fit one row. Full mode uses one metric tile per row. `bars_per_row` is ignored in both modes.
 
 ## Theming
 
@@ -232,7 +260,8 @@ Use [Nerwyn's Material You theme](https://github.com/Nerwyn/material-you-theme) 
 | No gauges or a missing gauge | The integration has not supplied that measurement, or its sensor entity is absent. Check the plant's sensor setup and `show_bars`. Metadata may be empty while the integration starts. |
 | Gauge has no active indicator | Check that the sensor value and min/max thresholds are numeric and that minimum is below maximum. |
 | Out-of-range gauge is not red | Default problem behaviour follows the integration's triggers. Check those triggers and `problem_sensors`, or use `problem_source: gauges`. |
-| Values disappear in compact display | Set `hide_units: false`; compact hides all value text by default. |
+| Values disappear in compact display | Check for `hide_units: true`; set it to `false` to restore value text (the default in both modes). |
+| Full tiles have no 24-hour range | Set `hide_history: false`, enable recorder statistics for measurement sensors and allow statistics to accumulate. Running-total DLI has no min/max/mean history. Current values still display. |
 | No battery indicator | Set `battery_sensor` and confirm that entity exists. Battery is not auto-detected. |
 | Photo shows a placeholder | Check `image` or the plant's `entity_picture` and whether the browser can load it. |
 
