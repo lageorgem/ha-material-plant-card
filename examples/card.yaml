@@ -19,13 +19,20 @@ hide_image: false
 # false is the default in both modes. true hides units beside full-mode
 # values, or the entire value text below compact-mode gauges.
 hide_units: false
-# Full only: 24h recorder statistics refresh every 10 minutes.
-# Measurement sensors need state_class: measurement; running-total DLI has no 24h data.
+# Full only: recorder statistics refresh every 10 minutes.
+# Optional string: 24h (default) or 7d; editor: Metrics → History window.
+history_period: 7d
+# Measurement sensors need state_class: measurement; label: Last 7 d here.
+# Cumulative sensors (total/total_increasing), including DLI, always show
+# Daily · 7 d: daily totals for the last 7 complete days, excluding today.
 hide_history: false
 image: /local/plants/orchid.jpg
 battery_sensor: sensor.sh_5_battery
 # Bare battery glyph turns red below this percentage; otherwise neutral.
 battery_warn_level: 10
+# Full-mode non-cumulative values, rings and title icons turn red outside
+# ideal bounds. Only selected problems add the red left accent and tint.
+# DLI's current running total keeps the problem-setting colour.
 problem_source: plant
 # Empty/omitted allows all measurements; this example selects two.
 problem_sensors:
