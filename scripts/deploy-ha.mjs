@@ -15,7 +15,7 @@ if (typeof globalThis.fetch !== 'function') {
 }
 
 const filename = 'material-plant-card.js';
-const resourcePath = `/local/material-plant-card/${filename}`;
+const resourcePrefix = '/local/material-plant-card/';
 const sha256 = (body) => createHash('sha256').update(body).digest('hex');
 
 async function loadSettings() {
@@ -50,6 +50,14 @@ async function loadSettings() {
       url.search || url.hash || !['', '/'].includes(url.pathname)) {
     throw new Error('HA_URL must be an HTTP(S) origin without credentials, query or path.');
   }
+  if (url.protocol !== 'https:') {
+    if (process.env.HA_ALLOW_INSECURE !== '1') {
+      const error = new Error('HA_URL must use HTTPS; local HTTP requires HA_ALLOW_INSECURE=1.');
+      error.code = 'HA_HTTPS_REQUIRED';
+      throw error;
+    }
+    console.error('WARNING: HA_ALLOW_INSECURE=1 sends the HA token over plaintext HTTP/WebSocket.');
+  }
   return { origin: url.origin, token };
 }
 
@@ -66,7 +74,23 @@ function lanHost() {
   throw new Error('No LAN IPv4 address found; set LAN_HOST.');
 }
 
-async function upload(origin, token, bundle, hash) {
+async function remoteMatches(origin, headers, resourcePath, hash, timeout = 5000) {
+  const remote = await fetch(`${origin}${resourcePath}?t=${Date.now()}`, {
+    headers,
+    redirect: 'error',
+    cache: 'no-store',
+    signal: AbortSignal.timeout(timeout),
+  });
+  const body = Buffer.from(await remote.arrayBuffer());
+  return remote.status === 200 && sha256(body) === hash;
+}
+
+async function upload(origin, token, bundle, hash, targetFilename) {
+  const resourcePath = `${resourcePrefix}${targetFilename}`;
+  const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  if (await remoteMatches(origin, headers, resourcePath, hash)) {
+    return 'already present, verified';
+  }
   const host = lanHost();
   const port = Number(process.env.DEPLOY_PORT ?? 8799);
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -89,14 +113,14 @@ async function upload(origin, token, bundle, hash) {
       server.once('error', reject);
       server.listen(port, '0.0.0.0', resolve);
     });
-    const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
     const response = await fetch(`${origin}/api/services/downloader/download_file`, {
       method: 'POST',
       headers,
+      redirect: 'error',
       body: JSON.stringify({
         url: `http://${host}:${port}/${filename}`,
         subdir: 'material-plant-card',
-        filename,
+        filename: targetFilename,
         overwrite: true,
       }),
       signal: AbortSignal.timeout(30000),
@@ -106,13 +130,8 @@ async function upload(origin, token, bundle, hash) {
     const deadline = Date.now() + 30000;
     while (Date.now() < deadline) {
       try {
-        const remote = await fetch(`${origin}${resourcePath}?t=${Date.now()}`, {
-          headers,
-          cache: 'no-store',
-          signal: AbortSignal.timeout(Math.min(5000, deadline - Date.now())),
-        });
-        const body = Buffer.from(await remote.arrayBuffer());
-        if (remote.ok && sha256(body) === hash) return;
+        if (await remoteMatches(origin, headers, resourcePath, hash,
+          Math.min(5000, deadline - Date.now()))) return 'downloaded, verified';
       } catch {
         // Transient errors are retried until the bounded verification deadline.
       }
@@ -162,7 +181,7 @@ function registerResource(origin, token, url) {
             throw new Error('Unable to list Lovelace resources.');
           }
           const existing = message.result.find((resource) =>
-            typeof resource.url === 'string' && resource.url.startsWith(resourcePath)
+            typeof resource.url === 'string' && resource.url.startsWith(resourcePrefix)
           );
           phase = 'save';
           socket.send(JSON.stringify(existing ? {
@@ -191,12 +210,16 @@ try {
   const { origin, token } = await loadSettings();
   const bundle = await readFile(new URL('../dist/material-plant-card.js', import.meta.url));
   const hash = sha256(bundle);
-  await upload(origin, token, bundle, hash);
-  const url = `${resourcePath}?v=${hash.slice(0, 8)}`;
+  const targetFilename = `material-plant-card-${hash.slice(0, 8)}.js`;
+  // Activation is reachable only after the remote bytes match the full hash.
+  console.log(await upload(origin, token, bundle, hash, targetFilename));
+  const url = `${resourcePrefix}${targetFilename}`;
   await registerResource(origin, token, url);
   console.log(url);
-} catch {
+} catch (error) {
   // Never print remote response bodies, raw exceptions, configuration or credentials.
-  console.error('HA deployment failed. Check configuration, connectivity, Downloader and Lovelace permissions.');
+  console.error(error.code === 'HA_HTTPS_REQUIRED'
+    ? 'HA_URL must use HTTPS; local HTTP requires HA_ALLOW_INSECURE=1.'
+    : 'HA deployment failed. Check configuration, connectivity, Downloader and Lovelace permissions.');
   process.exitCode = 1;
 }
