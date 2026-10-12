@@ -5,8 +5,13 @@ import { themeTokens } from '../theme';
 
 const CENTER = 24;
 const RADIUS = 20;
+const STROKE = 4;
 const START = 135;
 const SWEEP = 270;
+const ARC_TOP = CENTER - RADIUS - STROKE / 2;
+const ARC_BOTTOM = CENTER + RADIUS * Math.sin((START + SWEEP) * Math.PI / 180) + STROKE / 2;
+/** Vertical centre of the visible arc bounds, in the 48-unit viewBox. */
+export const OPTICAL_CENTER_Y = (ARC_TOP + ARC_BOTTOM) / 2;
 const HALF_GAP = 4;
 const ZONES = [
   { name: 'low', start: START, end: START + SWEEP * 0.2 - HALF_GAP },
@@ -86,7 +91,7 @@ export class MplGauge extends LitElement {
         --mpl-gauge-icon-size: 18px;
         --mpl-gauge-value-size: 12px;
         --mpl-gauge-value-line: 16px;
-        --mpl-gauge-track-width: 4;
+        --mpl-gauge-track-width: ${STROKE};
         --mpl-gauge-outer-track-width: 2;
         --mpl-gauge-dot-stroke: 2;
         --mpl-gauge-tone: var(--mpl-success);
@@ -112,6 +117,7 @@ export class MplGauge extends LitElement {
         max-width: 100%;
       }
       .dial {
+        position: relative;
         display: grid;
         place-items: center;
         width: var(--mpl-gauge-size);
@@ -157,6 +163,14 @@ export class MplGauge extends LitElement {
       }
       ha-icon {
         --mdc-icon-size: var(--mpl-gauge-icon-size);
+        position: absolute;
+        top: ${OPTICAL_CENTER_Y / 48 * 100}%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
         width: var(--mpl-gauge-icon-size);
         height: var(--mpl-gauge-icon-size);
         color: var(--mpl-on-surface-variant);
