@@ -37,8 +37,8 @@ Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha
 
 ## Highlights
 
-- Full mode (default, as in flower-card): a header and grouped Material 3 Expressive metric tiles with tonal icons, labels, large values with units and range bars with 24-hour history.
-- Compact mode: circular gauges with three zones: **too low / just right / too high**, a thick in-range band, thin outer zones, an active arc and a position dot.
+- Full mode (default, as in flower-card): a header and grouped Material 3 Expressive metric tiles with small tone-coloured icons, large values with units, ideal-bound ticks, a coloured 24-hour range, average marker and Min/Avg/Max badges.
+- Compact mode: circular gauges with centred icons and three zones: **too low / just right / too high**, a thick in-range band, thin outer zones, an active arc and a position dot.
 - Success colour for in-range readings, neutral for out-of-range advice, error colour for problems with bold, error-coloured value text.
 - Plant photo in an M3 Expressive cookie shape, with a placeholder for missing or broken images and a red error circle with a centred **!** when problems exist.
 - Name and species, or a problem summary such as **Moisture low · DLI low**.
@@ -51,7 +51,7 @@ Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha
 
 Full mode shows metric tiles and 24-hour ranges:
 
-<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/full-dark.png" alt="Full mode with metric tiles and 24-hour ranges" width="327">
+<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/full-dark.png" alt="Full mode: metric tiles with ideal ticks, 24-hour range, average marker and Min/Avg/Max badges; two tiles flagged as problems" width="327">
 
 The dashboard above shows eleven plants in compact mode. This compact single-card view shows a plant needing attention:
 
@@ -119,7 +119,7 @@ Defaults apply when keys are omitted. Only `type` and `entity` are required; eve
 | `hide_species` | boolean, optional | `false` | Hide species in either mode; does not hide problem summaries. | `true` |
 | `hide_image` | boolean, optional | `false` | Hide the photo/placeholder and its alert badge. | `true` |
 | `hide_units` | boolean, optional | `false` in both modes | Full: hides the unit next to each value, keeping the number. Compact: hides the **entire value text** below gauges. | `true` |
-| `hide_history` | boolean, optional | `false` | Full only: disables fetching and displaying 24-hour min–max ranges and averages; keeps current values and ideal ranges. | `true` |
+| `hide_history` | boolean, optional | `false` | Full only: disables history fetching; removes Last 24 h, the scale's min–max segment and average marker, and the Min/Avg/Max row. Keeps current values, ideal ranges, ticks and current-value rings. | `true` |
 | `image` | string, optional | Plant `entity_picture` | Picture URL or path override. A missing or broken image displays a placeholder. | `/local/plants/orchid.jpg` |
 | `battery_sensor` | string, optional | Unset; no indicator | Battery percentage sensor. Glyph is shown only if the entity exists. | `sensor.sh_5_battery` |
 | `battery_warn_level` | number, optional | `10` | Battery levels below this threshold use the error colour; otherwise neutral. | `10` |
@@ -163,15 +163,19 @@ Both modes show the same photo size and species line unless `hide_image` or `hid
 
 ## Reading full-mode tiles
 
-Each tile has a tonal icon, metric label, large current value with its unit, and a horizontal range bar. Thin too-low/too-high zones surround a thick ideal band. A ringed dot marks the current value; a translucent pill spans the last 24 hours' minimum and maximum, and a small triangle marks the 24-hour average. The caption shows the ideal and historical ranges, for example **Ideal 20–60 · 24h 25–48**. The historical range includes the current reading if it extends beyond the recorded range.
+The title row has a small tone-coloured icon and metric name, with **Last 24 h** on the right. A large current value with its unit sits on the left, with **Ideal a–b** below it.
 
-History comes from Home Assistant's recorder long-term statistics, using hourly minimum, maximum and mean data for the last 24 hours. Sensors need `state_class: measurement` and recorder statistics enabled; plant monitor measurement sensors provide that state class. DLI is a running total, so it shows no 24-hour min–max or average data. Unavailable statistics omit the history overlay and caption without hiding the current value or ideal range. History refreshes every **10 minutes**; `hide_history: true` disables it.
+On the right, a horizontal scale has tick marks at the ideal bounds. The last-24-hour minimum-to-maximum segment is success-coloured inside the ideal range and error-coloured outside it. A hollow ring marks the current value: success in range, error for a selected problem, or neutral for out-of-range advice according to [problem settings](#choosing-problem-behaviour). A triangle under the scale marks the 24-hour average, success-coloured within the ideal range and error-coloured outside it. Historical colours reflect the ideal bounds independently of problem settings. The historical range includes the current reading if it extends beyond the recorded range.
+
+Below the scale, **Min · Avg · Max** values each get an error badge when outside the ideal range. Missing history shows **—** for those values. Problem tiles also have an error accent on the left edge, a faint error tint and bold, error-coloured current-value text.
+
+History comes from Home Assistant's recorder long-term statistics, using hourly minimum, maximum and mean data for the last 24 hours. Sensors need `state_class: measurement` and recorder statistics enabled; plant monitor measurement sensors provide that state class. DLI is a running total, so it shows no 24-hour min–max segment or average marker, and its Min/Avg/Max values show **—**. Unavailable statistics behave the same way without hiding the current value or ideal range. History refreshes every **10 minutes**. `hide_history: true` disables fetching and removes **Last 24 h**, the historical segment, average marker and Min/Avg/Max row; the scale, ideal ticks and current-value ring remain.
 
 Tap a tile to open sensor more-info. `hide_units: true` hides only the unit next to the tile's value, not the number. Range position uses the same scaling as [compact gauges](#reading-compact-mode-gauges), including logarithmic lux scaling.
 
 ## Reading compact-mode gauges
 
-The thick middle band represents the plant's min/max range, including both boundaries. Thin bands on either side represent low and high readings. The coloured fill follows the track: thin in the too-low/too-high zones, thick in the just-right band, with the same gaps between zones. The active arc and dot show the current position; values beyond the gauge's visual extent are clamped at the ends.
+Icons are centred on the dial. The thick middle band represents the plant's min/max range, including both boundaries. Thin bands on either side represent low and high readings. The coloured fill follows the track: thin in the too-low/too-high zones, thick in the just-right band, with the same gaps between zones. The active arc and dot show the current position; values beyond the gauge's visual extent are clamped at the ends.
 
 Illuminance uses a logarithmic scale when the unit is `lx` and the minimum is positive. Other readings use a linear scale. These are range indicators, not percentages of a universal sensor maximum.
 
@@ -242,7 +246,7 @@ This is an independent implementation inspired by flower-card; no code is shared
 
 ## Layout & responsiveness
 
-The compact card footprint is approximately **327 × 160 px** at 327 px width with six gauges, versus flower-card's **327 × 203 px**. Full mode is taller: approximately **446 px** with six metric tiles. These are measured examples, not fixed heights: measurement count, available width and content affect sizing.
+The compact card footprint is approximately **327 × 160 px** at 327 px width with six gauges, versus flower-card's **327 × 203 px**. Full-mode tiles are approximately **84 px** tall; a six-metric full card is approximately **327 × 614 px**. These are measured examples, not fixed heights: measurement count, available width and content affect sizing.
 
 In compact mode, the card measures its width to decide how many gauges fit a row. If they do not fit one row, it balances them across rows, with the extra gauge on the first row and the last row centred. For two-row layouts: five gauges split **3/2**, six **3/3**, and seven **4/3**. At 327 px width, six gauges fit one row. Full mode uses one metric tile per row. `bars_per_row` is ignored in both modes.
 
