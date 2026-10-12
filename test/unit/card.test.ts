@@ -119,7 +119,7 @@ describe('material-plant-card', () => {
     const clockForTooltip = () => sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
 
     for (const pointerType of ['touch', 'pen']) {
-      it(`shows exact text on ${pointerType} long-press, suppresses click and expires after release`, async () => {
+      it(`shows exact text on ${pointerType} long-press, suppresses click and persists until pointerdown`, async () => {
         const hass = fakeHass({ moisture: { min: 15, max: 60, sensor: 'sensor.moisture', unit_of_measurement: '%' } });
         hass.states['sensor.moisture'] = state('6');
         const card = await mount(cfg(), hass);
@@ -137,15 +137,15 @@ describe('material-plant-card', () => {
         expect(query(card, '[role="tooltip"] .tooltip-title').textContent).to.equal('Moisture · too low');
         expect(query(card, '[role="tooltip"] .tooltip-body').textContent).to.equal('6 % · ideal 15–60 %');
         expect(button.getAttribute('aria-label')).to.equal('Moisture: 6 % (15–60 %) · low');
-        expect(button.getAttribute('aria-describedby')).to.equal('mpl-tooltip');
+        expect(button.hasAttribute('aria-describedby')).to.equal(false);
         pointer(button, 'pointerup', pointerType);
-        const click = new MouseEvent('click', { bubbles: true, composed: true, cancelable: true });
+        const click = new MouseEvent('click', { detail: 1, bubbles: true, composed: true, cancelable: true });
         expect(button.dispatchEvent(click)).to.equal(false);
         expect(moreInfo.called).to.equal(false);
         expect(clicks.called).to.equal(false);
-        await clock.tickAsync(1499);
+        await clock.tickAsync(2000);
         expect(query(card, '.tooltip')).not.to.equal(null);
-        await clock.tickAsync(1);
+        pointer(document, 'pointerdown');
         await settle(card);
         expect(query(card, '.tooltip')).to.equal(null);
         expect(button.hasAttribute('aria-describedby')).to.equal(false);
@@ -154,6 +154,118 @@ describe('material-plant-card', () => {
         card.remove();
       });
     }
+
+    for (const dismissal of ['cancel', 'keydown', 'keyboard-click', 'timeout', 'other-pointer', 'suppressed'] as const) {
+      it(`scopes long-press suppression: ${dismissal}`, async () => {
+        const card = await mount();
+        const clock = clockForTooltip();
+        const button = query<HTMLButtonElement>(card, '.gauge-btn');
+        const moreInfo = sinon.spy();
+        card.addEventListener('hass-more-info', moreInfo);
+        pointer(button, 'pointerdown');
+        await clock.tickAsync(450);
+        if (dismissal === 'cancel') pointer(button, 'pointercancel');
+        else pointer(button, 'pointerup');
+        if (dismissal === 'keydown' || dismissal === 'cancel') {
+          button.focus();
+          button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, composed: true }));
+        }
+        if (dismissal === 'timeout') await clock.tickAsync(801);
+        const click = new PointerEvent('click', {
+          detail: ['cancel', 'keyboard-click'].includes(dismissal) ? 0 : 1,
+          pointerId: dismissal === 'other-pointer' ? 2 : 1,
+          bubbles: true, composed: true, cancelable: true,
+        });
+        expect(button.dispatchEvent(click)).to.equal(dismissal !== 'suppressed');
+        expect(moreInfo.callCount).to.equal(dismissal === 'suppressed' ? 0 : 1);
+        button.click();
+        expect(moreInfo.callCount).to.equal(dismissal === 'suppressed' ? 1 : 2);
+        card.remove();
+      });
+    }
+
+    for (const dismissal of ['pointerdown', 'Escape', 'disconnect'] as const) {
+      it(`removes the visible touch tooltip document listener on ${dismissal}`, async () => {
+        const card = await mount();
+        const clock = clockForTooltip();
+        const add = sinon.spy(document, 'addEventListener');
+        const remove = sinon.spy(document, 'removeEventListener');
+        const button = query(card, '.gauge-btn');
+        pointer(button, 'pointerdown');
+        await clock.tickAsync(450);
+        await settle(card);
+        const registration = add.getCalls().find((call) => call.args[0] === 'pointerdown');
+        expect(registration).not.to.equal(undefined);
+        if (dismissal === 'pointerdown') pointer(document, 'pointerdown');
+        if (dismissal === 'Escape') window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+        if (dismissal === 'disconnect') card.remove();
+        await settle(card);
+        expect(query(card, '.tooltip')).to.equal(null);
+        expect(remove.calledWith('pointerdown', registration!.args[1], true)).to.equal(true);
+        card.remove();
+      });
+    }
+
+    it('bridges the hover gap and retains the tooltip while hovered or focused', async () => {
+      const card = await mount();
+      const clock = clockForTooltip();
+      const button = query<HTMLButtonElement>(card, '.gauge-btn');
+      pointer(button, 'pointerenter', 'mouse');
+      await clock.tickAsync(500);
+      await settle(card);
+      const tooltip = query(card, '.tooltip');
+      expect(getComputedStyle(tooltip).pointerEvents).to.equal('auto');
+      pointer(button, 'pointerleave', 'mouse');
+      await clock.tickAsync(149);
+      pointer(tooltip, 'pointerenter', 'mouse');
+      await clock.tickAsync(500);
+      expect(query(card, '.tooltip')).to.equal(tooltip);
+      pointer(tooltip, 'pointerleave', 'mouse');
+      await clock.tickAsync(149);
+      expect(query(card, '.tooltip')).to.equal(tooltip);
+      pointer(button, 'pointerenter', 'mouse');
+      await clock.tickAsync(500);
+      expect(query(card, '.tooltip')).to.equal(tooltip);
+      sinon.stub(button, 'matches').withArgs(':focus-visible').returns(true);
+      button.focus();
+      pointer(button, 'pointerleave', 'mouse');
+      await clock.tickAsync(150);
+      await settle(card);
+      expect(query(card, '.tooltip')).not.to.equal(null);
+      button.blur();
+      await settle(card);
+      expect(query(card, '.tooltip')).to.equal(null);
+      pointer(button, 'pointerenter', 'mouse');
+      await clock.tickAsync(500);
+      await settle(card);
+      pointer(button, 'pointerleave', 'mouse');
+      pointer(query(card, '.tooltip'), 'pointerenter', 'mouse');
+      pointer(query(card, '.tooltip'), 'pointerleave', 'mouse');
+      await clock.tickAsync(150);
+      await settle(card);
+      expect(query(card, '.tooltip')).to.equal(null);
+      card.remove();
+    });
+
+    it('repositions a visible tooltip on a same-capacity resize', async () => {
+      const card = await mount();
+      card.style.width = '350px';
+      await settleLayout(card);
+      const button = card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')[3];
+      sinon.stub(button, 'matches').withArgs(':focus-visible').returns(true);
+      button.focus();
+      await settle(card);
+      const tooltip = query(card, '.tooltip');
+      tooltip.style.animation = 'none';
+      const left = tooltip.style.left;
+      card.style.width = '327px';
+      await settleLayout(card);
+      expect(query(card, '.gauges').style.getPropertyValue('--mpl-cols')).to.equal('6');
+      expect(tooltip.style.left).not.to.equal(left);
+      const bounds = query(card, 'ha-card').getBoundingClientRect();
+      expect(tooltip.getBoundingClientRect().left).to.be.at.least(bounds.left + 8);
+      expect(tooltip.getBoundingClientRect().right).to.be.at.most(bounds.right - 8);
+    });
 
     it('keeps short taps as more-info without a tooltip', async () => {
       const card = await mount();
@@ -203,6 +315,7 @@ describe('material-plant-card', () => {
       expect(query(card, '.tooltip-title').textContent).to.equal('Conductivity');
       expect(query(card, '.tooltip-body').textContent).to.equal('25 % · ideal 10–50 %');
       pointer(buttons[1], 'pointerleave', 'mouse');
+      await clock.tickAsync(150);
       await settle(card);
       expect(query(card, '.tooltip')).to.equal(null);
       pointer(buttons[0], 'pointerenter', 'mouse');

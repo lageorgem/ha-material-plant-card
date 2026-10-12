@@ -51,7 +51,26 @@ export class MaterialPlantCard extends LitElement {
   private _tooltipShowTimer?: ReturnType<typeof setTimeout>;
   private _tooltipHideTimer?: ReturnType<typeof setTimeout>;
   private _press?: { button: HTMLButtonElement; id: number; x: number; y: number; long: boolean };
-  private _suppressClick?: HTMLButtonElement;
+  private _suppressClick?: { button: HTMLButtonElement; id: number; released: boolean };
+  private _suppressClickTimer?: ReturnType<typeof setTimeout>;
+  private _hoveredGauge?: HTMLButtonElement;
+  private _tooltipHovered = false;
+  private _focusedGauge?: HTMLButtonElement;
+  private _touchTooltip = false;
+
+  private _clearClickSuppression(): void {
+    clearTimeout(this._suppressClickTimer);
+    this._suppressClickTimer = undefined;
+    this._suppressClick = undefined;
+  }
+
+  private _showTooltip(button: HTMLButtonElement, touch = false): void {
+    clearTimeout(this._tooltipHideTimer);
+    this._tooltipHideTimer = undefined;
+    this._tooltip = button;
+    this._touchTooltip = touch;
+    if (touch) document.addEventListener('pointerdown', this._dismissTooltip, true);
+  }
 
   private _hideTooltip = (): void => {
     clearTimeout(this._tooltipShowTimer);
@@ -59,20 +78,26 @@ export class MaterialPlantCard extends LitElement {
     this._tooltipShowTimer = undefined;
     this._tooltipHideTimer = undefined;
     this._tooltip = undefined;
+    this._hoveredGauge = undefined;
+    this._tooltipHovered = false;
+    this._focusedGauge = undefined;
+    this._touchTooltip = false;
+    document.removeEventListener('pointerdown', this._dismissTooltip, true);
   };
 
   private _dismissTooltip = (): void => {
     this._hideTooltip();
     this._press = undefined;
+    this._clearClickSuppression();
   };
 
   private _tooltipKeydown = (event: KeyboardEvent): void => {
+    this._clearClickSuppression();
     if (event.key === 'Escape') this._dismissTooltip();
   };
 
   private _gaugePointerDown(event: PointerEvent): void {
     this._dismissTooltip();
-    this._suppressClick = undefined;
     if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
     const button = event.currentTarget as HTMLButtonElement;
     const press = { button, id: event.pointerId, x: event.clientX, y: event.clientY, long: false };
@@ -80,8 +105,8 @@ export class MaterialPlantCard extends LitElement {
     this._tooltipShowTimer = setTimeout(() => {
       this._tooltipShowTimer = undefined;
       press.long = true;
-      this._suppressClick = button;
-      this._tooltip = button;
+      this._suppressClick = { button, id: press.id, released: false };
+      this._showTooltip(button, true);
     }, 450);
   }
 
@@ -96,37 +121,81 @@ export class MaterialPlantCard extends LitElement {
     clearTimeout(this._tooltipShowTimer);
     this._tooltipShowTimer = undefined;
     this._press = undefined;
-    if (press.long) this._tooltipHideTimer = setTimeout(this._hideTooltip, 1500);
+    if (press.long && this._suppressClick?.id === press.id) {
+      this._suppressClick.released = true;
+      this._suppressClickTimer = setTimeout(() => this._clearClickSuppression(), 800);
+    }
   };
 
   private _gaugePointerCancel = (event: PointerEvent): void => {
-    if (event.pointerId === this._press?.id) this._dismissTooltip();
+    if (event.pointerId === this._press?.id || event.pointerId === this._suppressClick?.id) this._dismissTooltip();
   };
 
   private _gaugePointerEnter(event: PointerEvent): void {
     if (event.pointerType !== 'mouse') return;
-    this._dismissTooltip();
     const button = event.currentTarget as HTMLButtonElement;
+    if (this._tooltip === button) {
+      this._hoveredGauge = button;
+      clearTimeout(this._tooltipHideTimer);
+      this._tooltipHideTimer = undefined;
+      return;
+    }
+    if (this._focusedGauge || this._touchTooltip) return;
+    this._dismissTooltip();
+    this._hoveredGauge = button;
     this._tooltipShowTimer = setTimeout(() => {
       this._tooltipShowTimer = undefined;
-      this._tooltip = button;
+      this._showTooltip(button);
     }, 500);
   }
 
   private _gaugePointerLeave(event: PointerEvent): void {
-    if (event.pointerType === 'mouse') this._hideTooltip();
+    if (event.pointerType !== 'mouse') return;
+    if (this._hoveredGauge === event.currentTarget) this._hoveredGauge = undefined;
+    clearTimeout(this._tooltipShowTimer);
+    this._tooltipShowTimer = undefined;
+    this._scheduleTooltipHide();
+  }
+
+  private _scheduleTooltipHide(): void {
+    clearTimeout(this._tooltipHideTimer);
+    if (!this._tooltip || this._touchTooltip) return;
+    this._tooltipHideTimer = setTimeout(() => {
+      this._tooltipHideTimer = undefined;
+      if (!this._hoveredGauge && !this._tooltipHovered && !this._focusedGauge) this._hideTooltip();
+    }, 150);
+  }
+
+  private _tooltipPointerEnter(): void {
+    this._tooltipHovered = true;
+    clearTimeout(this._tooltipHideTimer);
+    this._tooltipHideTimer = undefined;
+  }
+
+  private _tooltipPointerLeave(): void {
+    this._tooltipHovered = false;
+    this._scheduleTooltipHide();
+  }
+
+  private _gaugeBlur(): void {
+    this._focusedGauge = undefined;
+    if (!this._hoveredGauge && !this._tooltipHovered && !this._touchTooltip) this._hideTooltip();
   }
 
   private _gaugeFocus(event: FocusEvent): void {
     const button = event.currentTarget as HTMLButtonElement;
     if (!button.matches(':focus-visible')) return;
-    this._dismissTooltip();
-    this._tooltip = button;
+    if (this._tooltip !== button) this._dismissTooltip();
+    this._focusedGauge = button;
+    this._showTooltip(button);
   }
 
   private _gaugeClick(event: MouseEvent, entity: string): void {
-    if (event.currentTarget === this._suppressClick) {
-      this._suppressClick = undefined;
+    const suppression = this._suppressClick;
+    if (event.detail === 0) this._clearClickSuppression();
+    if (event.detail > 0 && suppression?.released && event.currentTarget === suppression.button &&
+      (!(event instanceof PointerEvent) || event.pointerId === suppression.id)) {
+      this._clearClickSuppression();
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -135,6 +204,10 @@ export class MaterialPlantCard extends LitElement {
   }
 
   protected updated(): void {
+    this._positionTooltip();
+  }
+
+  private _positionTooltip(): void {
     const tooltip = this.shadowRoot?.querySelector<HTMLElement>('.tooltip');
     const surface = this.shadowRoot?.querySelector<HTMLElement>('ha-card');
     const button = this._tooltip;
@@ -232,7 +305,6 @@ export class MaterialPlantCard extends LitElement {
   public disconnectedCallback(): void {
     super.disconnectedCallback();
     this._dismissTooltip();
-    this._suppressClick = undefined;
     window.removeEventListener('pointermove', this._gaugePointerMove, true);
     window.removeEventListener('pointerup', this._gaugePointerUp, true);
     window.removeEventListener('pointercancel', this._gaugePointerCancel, true);
@@ -260,11 +332,12 @@ export class MaterialPlantCard extends LitElement {
         this._gaugesFrame = undefined;
         const innerWidth = entry.contentRect.width - 32;
         const capacity = Math.max(1, Math.floor((innerWidth + 4) / 48));
-        if (capacity === this._gaugeCapacity) continue;
         // Host height can change with the rows. Defer writes beyond observer delivery.
         this._gaugesFrame = requestAnimationFrame(() => {
           this._gaugesFrame = undefined;
-          if (this.isConnected && capacity !== this._gaugeCapacity) this._gaugeCapacity = capacity;
+          if (!this.isConnected) return;
+          if (capacity !== this._gaugeCapacity) this._gaugeCapacity = capacity;
+          if (this._tooltip) this._positionTooltip();
         });
       }
     });
@@ -345,17 +418,17 @@ export class MaterialPlantCard extends LitElement {
               <mpl-battery .level=${battery.level} .tone=${battery.tone}></mpl-battery>
             </button>` : nothing}
         </div>
-        ${measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m, index) => html`
+        ${measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
           <button class="gauge-btn" type="button" aria-label=${describeMeasurement(m)}
-            aria-describedby=${this._tooltip && this._tooltip === this.shadowRoot?.querySelectorAll('.gauge-btn')[index] ? 'mpl-tooltip' : nothing}
             @pointerdown=${this._gaugePointerDown} @pointerenter=${this._gaugePointerEnter} @pointerleave=${this._gaugePointerLeave}
-            @focus=${this._gaugeFocus} @blur=${this._hideTooltip}
+            @focus=${this._gaugeFocus} @blur=${this._gaugeBlur}
             @contextmenu=${(event: Event) => event.preventDefault()}
             @click=${(event: MouseEvent) => this._gaugeClick(event, m.sensor ?? cfg.entity)}>
             <mpl-gauge .embedded=${true} .fraction=${m.fraction} .tone=${toneFor(m, problems)} .icon=${m.icon}
               .value=${hideUnits ? '' : formatValue(m.value, m.unit, hideUnits)} .label=${describeMeasurement(m)}></mpl-gauge>
           </button>`)}</div>` : nothing}
-        ${this._tooltip && tooltipText ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip">
+        ${this._tooltip && tooltipText ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip"
+          @pointerenter=${this._tooltipPointerEnter} @pointerleave=${this._tooltipPointerLeave}>
           <span class="tooltip-title">${tooltipText[0]}</span>
           <span class="tooltip-body">${tooltipText[1]}</span>
         </div>` : nothing}
@@ -365,7 +438,7 @@ export class MaterialPlantCard extends LitElement {
   static styles = [themeTokens, css`
     :host { display: block; }
     ha-card { position: relative; display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
-    .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
+    .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: auto; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
     .tooltip-title, .tooltip-body { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tooltip-title { font-weight: 500; }
     @keyframes tooltip-enter { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: scale(1); } }
