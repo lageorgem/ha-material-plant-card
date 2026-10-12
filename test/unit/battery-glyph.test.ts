@@ -56,6 +56,32 @@ describe('mpl-battery', () => {
     expect(() => contrastRatio('invalid', '#ffffff')).to.throw(TypeError);
   });
 
+  it('keeps the unknown question mark above 4.5:1 on the outline track', async () => {
+    const background = '#201b13';
+    const outline = '#9b8f80';
+    const foreground = '#d2c4b4';
+    const el = await mount();
+    el.style.setProperty('--mpl-surface-bg', background);
+    el.style.setProperty('--mpl-outline', outline);
+    el.style.setProperty('--mpl-on-surface-variant', foreground);
+    const root = el.shadowRoot!;
+    const text = root.querySelector('text')!;
+    const track = root.querySelector('.track')!;
+    const nub = root.querySelector('.nub')!;
+    const opacity = Number(getComputedStyle(track).opacity);
+
+    expect(opacity).to.equal(0.3);
+    expect(contrastRatio(foreground, blend(background, outline, opacity))).to.be.at.least(4.5);
+    expect(text.textContent).to.equal('?');
+    expect(getComputedStyle(text).fill).to.equal('rgb(210, 196, 180)');
+    expect(getComputedStyle(track).fill).to.equal('rgb(155, 143, 128)');
+    expect(getComputedStyle(nub).fill).to.equal('rgb(155, 143, 128)');
+    expect(Number(getComputedStyle(nub).opacity)).to.equal(opacity);
+
+    el.style.setProperty('--mpl-on-surface-variant', 'rgb(20, 30, 40)');
+    expect(getComputedStyle(text).fill).to.equal('rgb(20, 30, 40)');
+  });
+
   for (const [tone, color] of [['ok', '#d2c4b4'], ['low', '#ffb4ab']] as const) {
     it(`keeps ${tone} digits above 4.5:1 on both track and fill at every level`, async () => {
       const background = '#201b13';

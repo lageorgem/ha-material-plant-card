@@ -58,7 +58,7 @@ export class MplBattery extends LitElement {
           ` : nothing}
           ${level === null ? svg`
             <text x="13.5" y="7.5" text-anchor="middle" dominant-baseline="central"
-              fill="currentColor">?</text>
+              fill="var(--mpl-on-surface-variant)">?</text>
           ` : svg`
             <text class="number-filled" x="13.5" y="7.5" text-anchor="middle"
               dominant-baseline="central" clip-path=${`url(#${filledId})`}>${level}</text>
