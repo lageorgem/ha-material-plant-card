@@ -10,7 +10,9 @@ export const themeTokens = css`
     --mpl-secondary-container: var(--md-sys-color-secondary-container, rgba(103, 80, 164, 0.14));
     --mpl-on-secondary-container: var(--md-sys-color-on-secondary-container, var(--primary-text-color, #1d192b));
     --mpl-tertiary: var(--md-sys-color-tertiary, #7d5260);
+    --mpl-success: var(--md-sys-color-success, var(--success-color, #4caf50));
     --mpl-error: var(--md-sys-color-error, var(--error-color, #b3261e));
+    --mpl-on-error: var(--md-sys-color-on-error, #ffffff);
     --mpl-error-container: var(--md-sys-color-error-container, #f9dedc);
     --mpl-on-error-container: var(--md-sys-color-on-error-container, #410e0b);
     --mpl-surface: var(--md-sys-color-surface, var(--card-background-color, #fef7ff));

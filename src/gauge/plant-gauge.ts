@@ -8,6 +8,11 @@ const RADIUS = 20;
 const START = 135;
 const SWEEP = 270;
 const HALF_GAP = 4;
+const ZONES = [
+  { name: 'low', start: START, end: START + SWEEP * 0.2 - HALF_GAP },
+  { name: 'ok', start: START + SWEEP * 0.2 + HALF_GAP, end: START + SWEEP * 0.8 - HALF_GAP },
+  { name: 'high', start: START + SWEEP * 0.8 + HALF_GAP, end: START + SWEEP },
+] as const;
 
 function pointAt(cx: number, cy: number, r: number, angle: number) {
   const radians = angle * Math.PI / 180;
@@ -36,7 +41,6 @@ export class MplGauge extends LitElement {
     const showIndicator = fraction !== null && this.tone !== 'unknown';
     const end = START + SWEEP * (fraction ?? 0);
     const dot = pointAt(CENTER, CENTER, RADIUS, end);
-    const activePath = arcPath(CENTER, CENTER, RADIUS, START, end);
 
     return html`
       <div
@@ -51,12 +55,16 @@ export class MplGauge extends LitElement {
         <div class="dial">
           <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
             ${svg`
-              <path class="track-low" d=${arcPath(CENTER, CENTER, RADIUS, START, START + SWEEP * 0.2 - HALF_GAP)}></path>
-              <path class="track-ok" d=${arcPath(CENTER, CENTER, RADIUS, START + SWEEP * 0.2 + HALF_GAP, START + SWEEP * 0.8 - HALF_GAP)}></path>
-              <path class="track-high" d=${arcPath(CENTER, CENTER, RADIUS, START + SWEEP * 0.8 + HALF_GAP, START + SWEEP)}></path>
-              ${showIndicator && fraction !== 0 ? svg`
-                <path class="active" d=${activePath} style=${`d: path('${activePath}')`}></path>
-              ` : nothing}
+              ${ZONES.map(zone => svg`
+                <path class=${`track-${zone.name}`} d=${arcPath(CENTER, CENTER, RADIUS, zone.start, zone.end)}></path>
+              `)}
+              ${showIndicator ? ZONES.map(zone => {
+                if (end <= zone.start) return nothing;
+                const activePath = arcPath(CENTER, CENTER, RADIUS, zone.start, Math.min(zone.end, end));
+                return svg`
+                  <path class=${`active active-${zone.name}`} d=${activePath} style=${`d: path('${activePath}')`}></path>
+                `;
+              }) : nothing}
               ${showIndicator ? svg`
                 <circle class="dot" cx=${dot.x} cy=${dot.y} r="3.5"
                   style=${`cx: ${dot.x}px; cy: ${dot.y}px;`}></circle>
@@ -81,7 +89,7 @@ export class MplGauge extends LitElement {
         --mpl-gauge-track-width: 4;
         --mpl-gauge-outer-track-width: 2;
         --mpl-gauge-dot-stroke: 2;
-        --mpl-gauge-tone: var(--mpl-primary);
+        --mpl-gauge-tone: var(--mpl-success);
         --mpl-gauge-motion: var(
           --md-sys-motion-expressive-spatial-default,
           500ms cubic-bezier(0.38, 1.21, 0.22, 1)
@@ -92,7 +100,7 @@ export class MplGauge extends LitElement {
         max-width: 100%;
       }
       :host([tone='advisory']) {
-        --mpl-gauge-tone: var(--mpl-tertiary);
+        --mpl-gauge-tone: var(--mpl-on-surface-variant);
       }
       :host([tone='problem']) {
         --mpl-gauge-tone: var(--mpl-error);
@@ -124,8 +132,13 @@ export class MplGauge extends LitElement {
         stroke-linecap: round;
       }
       .track-low,
-      .track-high {
+      .track-high,
+      .active-low,
+      .active-high {
         stroke-width: var(--mpl-gauge-outer-track-width);
+      }
+      .track-low,
+      .track-high {
         stroke: var(--mpl-outline-variant);
       }
       .track-ok {
@@ -149,6 +162,7 @@ export class MplGauge extends LitElement {
         color: var(--mpl-on-surface-variant);
       }
       .value {
+        font-weight: 400;
         font-size: var(--mpl-gauge-value-size);
         line-height: var(--mpl-gauge-value-line);
         color: var(--mpl-on-surface);
@@ -159,6 +173,9 @@ export class MplGauge extends LitElement {
       :host([tone='problem']) ha-icon,
       :host([tone='problem']) .value {
         color: var(--mpl-error);
+      }
+      :host([tone='problem']) .value {
+        font-weight: 700;
       }
       @media (prefers-reduced-motion: reduce) {
         .active,

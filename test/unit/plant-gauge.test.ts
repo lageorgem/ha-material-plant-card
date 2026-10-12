@@ -42,8 +42,8 @@ describe('mpl-gauge', () => {
 
     it('disables active arc and dot transitions when reduced motion is requested', async () => {
       await emulateMedia({ reducedMotion: 'no-preference' });
-      const el = await mount(0.5, 'ok');
-      const indicators = ['.active', '.dot'].map(selector => ({
+      const el = await mount(0.9, 'ok');
+      const indicators = ['.active-low', '.active-ok', '.active-high', '.dot'].map(selector => ({
         selector,
         element: el.shadowRoot!.querySelector(selector)!,
       }));
@@ -96,16 +96,27 @@ describe('mpl-gauge', () => {
   });
 
   for (const tone of ['ok', 'advisory', 'problem'] as const) {
-    for (const fraction of [0.1, 0.2, 0.5, 0.8, 1]) {
-      it(`renders the active arc and dot for ${tone} at ${fraction}`, async () => {
+    for (const fraction of [0.1, 0.2, 0.5, 0.8, 0.9, 1]) {
+      it(`renders zone-aligned active segments and dot for ${tone} at ${fraction}`, async () => {
         const el = await mount(fraction, tone);
-        const active = el.shadowRoot!.querySelector('.active')!;
+        const active = [...el.shadowRoot!.querySelectorAll('.active')];
         const dot = el.shadowRoot!.querySelector('.dot')!;
         expect(el.getAttribute('tone')).to.equal(tone);
-        expect(active.namespaceURI).to.equal('http://www.w3.org/2000/svg');
-        expect(getComputedStyle(active).strokeWidth).to.equal('4px');
-        expect(active.previousElementSibling!.classList.contains('track-high')).to.equal(true);
-        expect(active.getAttribute('d')).to.equal(arcPath(24, 24, 20, 135, 135 + 270 * fraction));
+        const angle = 135 + 270 * fraction;
+        const expected = [
+          { zone: 'low', start: 135, end: 185, width: '2px' },
+          { zone: 'ok', start: 193, end: 347, width: '4px' },
+          { zone: 'high', start: 355, end: 405, width: '2px' },
+        ].filter(zone => angle > zone.start);
+        expect(active.length).to.equal(expected.length);
+        expected.forEach((zone, index) => {
+          const segment = active[index];
+          expect(segment.namespaceURI).to.equal('http://www.w3.org/2000/svg');
+          expect(segment.classList.contains(`active-${zone.zone}`)).to.equal(true);
+          expect(segment.getAttribute('d')).to.equal(arcPath(24, 24, 20, zone.start, Math.min(zone.end, angle)));
+          expect(getComputedStyle(segment).strokeWidth).to.equal(zone.width);
+          expect(getComputedStyle(segment).strokeLinecap).to.equal('round');
+        });
         const radians = (135 + 270 * fraction) * Math.PI / 180;
         expect(Number(dot.getAttribute('cx'))).to.be.closeTo(24 + 20 * Math.cos(radians), 0.01);
         expect(Number(dot.getAttribute('cy'))).to.be.closeTo(24 + 20 * Math.sin(radians), 0.01);
@@ -123,6 +134,41 @@ describe('mpl-gauge', () => {
       expect(el.shadowRoot!.querySelector('.gauge')!.getAttribute('aria-valuenow')).to.equal('0');
     });
   }
+
+  for (const [tone, colour] of [
+    ['ok', 'rgb(10, 20, 30)'],
+    ['problem', 'rgb(40, 50, 60)'],
+    ['advisory', 'rgb(70, 80, 90)'],
+  ] as const) {
+    it(`uses the ${tone} tone for all active segments and the dot`, async () => {
+      // Explicit inheritance lets wrapper overrides take precedence over host token defaults.
+      const wrapper = await fixture<HTMLDivElement>(html`
+        <div style="--mpl-success: rgb(10, 20, 30); --mpl-error: rgb(40, 50, 60); --mpl-on-surface-variant: rgb(70, 80, 90); --mpl-on-surface: rgb(100, 110, 120); --mpl-surface-bg: rgb(130, 140, 150)">
+          <mpl-gauge .fraction=${0.9} .tone=${tone} value="13%"
+            style="--mpl-success: inherit; --mpl-error: inherit; --mpl-on-surface-variant: inherit; --mpl-on-surface: inherit; --mpl-surface-bg: inherit"></mpl-gauge>
+        </div>
+      `);
+      const el = wrapper.querySelector('mpl-gauge')!;
+      await el.updateComplete;
+      for (const segment of el.shadowRoot!.querySelectorAll('.active')) {
+        expect(getComputedStyle(segment).stroke).to.equal(colour);
+      }
+      const dot = getComputedStyle(el.shadowRoot!.querySelector('.dot')!);
+      expect(dot.fill).to.equal(colour);
+      expect(dot.stroke).to.equal('rgb(130, 140, 150)');
+      const value = getComputedStyle(el.shadowRoot!.querySelector('.value')!);
+      expect(value.color).to.equal(tone === 'problem' ? colour : 'rgb(100, 110, 120)');
+      expect(value.fontWeight).to.equal(tone === 'problem' ? '700' : '400');
+      expect(getComputedStyle(el.shadowRoot!.querySelector('ha-icon')!).color)
+        .to.equal(tone === 'problem' ? colour : 'rgb(70, 80, 90)');
+    });
+  }
+
+  it('uses the Material success token supplied by the theme', async () => {
+    const el = await mount(0.5, 'ok');
+    el.style.setProperty('--md-sys-color-success', '#6b9b26');
+    expect(getComputedStyle(el.shadowRoot!.querySelector('.active')!).stroke).to.equal('rgb(107, 155, 38)');
+  });
 
   for (const tone of ['ok', 'advisory', 'problem', 'unknown'] as const) {
     it(`omits the active arc, dot and aria-valuenow for null with ${tone}`, async () => {
