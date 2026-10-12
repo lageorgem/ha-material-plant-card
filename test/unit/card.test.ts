@@ -25,7 +25,9 @@ function fakeHass(data: PlantInfo = info) {
   };
   const callWS = sinon.stub().callsFake(async (msg: Record<string, unknown>) =>
     msg.type === 'plant/get_info' ? { result: data } :
-      Object.fromEntries((msg.statistic_ids as string[]).map((id) => [id, [{ min: 15, max: 35, mean: 25 }]])));
+      Object.fromEntries((msg.statistic_ids as string[]).map((id) => [id, msg.period === 'day'
+        ? [{ end: Date.now() - 86400000, change: 8 }, { end: Date.now(), change: 12 }, { end: Date.now() + 86400000, change: 0.7 }]
+        : [{ min: 15, max: 35, mean: 25 }]])));
   return { states, callWS };
 }
 type FakeHass = ReturnType<typeof fakeHass>;
@@ -108,7 +110,7 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
-    it('accents only problem tiles and removes the accent when the tone becomes advisory', async () => {
+    it('accents only real problem tiles while keeping out-of-bounds values red', async () => {
       const hass = fakeHass();
       hass.states[ENTITY] = state('problem', { problems: [{ sensor_type: 'moisture', status: 'Low' }] });
       hass.states['sensor.moisture'] = state('5');
@@ -129,10 +131,97 @@ describe('material-plant-card', () => {
       }
       card.setConfig(full({ problem_sensors: ['temperature'] }));
       await settle(card);
-      expect(rows(card)[0].tone).to.equal('advisory');
+      expect(rows(card)[0].tone).to.equal('problem');
       expect(buttons[0].classList.contains('problem')).to.equal(false);
       expect(getComputedStyle(buttons[0]).boxShadow).to.equal('none');
       expect(getComputedStyle(buttons[0]).backgroundImage).to.equal('none');
+      card.remove();
+    });
+
+    for (const value of ['5', '60']) {
+      it(`uses error tone without a problem accent for a non-cumulative value ${value}`, async () => {
+        const hass = fakeHass();
+        hass.states['sensor.moisture'] = state(value);
+        const card = await mount(full({ show_bars: ['moisture'], problem_sensors: [] }), hass);
+        expect(rows(card)[0].tone).to.equal('problem');
+        expect(query(card, '.tile-btn').classList.contains('problem')).to.equal(false);
+        expect(query(card, '.problem-badge')).to.equal(null);
+        card.remove();
+      });
+    }
+
+    for (const stateClass of ['total', 'total_increasing']) {
+      it(`uses complete daily totals and advisory current tone for ${stateClass} sensors`, async () => {
+        const hass = fakeHass();
+        hass.states['sensor.dli'] = state('0.7', { state_class: stateClass });
+        const card = await mount(full({ show_bars: ['moisture', 'dli'] }), hass);
+        await settle(card);
+        expect(calls(hass)).to.have.length(2);
+        expect(calls(hass).find((call) => call.args[0].period === 'hour')!.args[0].statistic_ids).to.deep.equal(['sensor.moisture']);
+        expect(calls(hass).find((call) => call.args[0].period === 'day')!.args[0].statistic_ids).to.deep.equal(['sensor.dli']);
+        const row = rows(card)[1];
+        expect(row.stats).to.deep.equal({ min: 8, max: 12, mean: 10 });
+        expect(row.periodLabel).to.equal('Daily · 7 d');
+        expect(row.tone).to.equal('advisory');
+        const button = card.shadowRoot!.querySelectorAll('.tile-btn')[1];
+        expect(button.classList.contains('problem')).to.equal(false);
+        expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.stats, 'daily totals, last 7 days'));
+        assign(card, { ...hass, states: { ...hass.states, 'sensor.dli': state('60', { state_class: stateClass }) } });
+        await settle(card);
+        expect(rows(card)[1].stats).to.deep.equal({ min: 8, max: 12, mean: 10 });
+        expect(rows(card)[1].tone).to.equal('advisory');
+        card.remove();
+      });
+    }
+
+    it('fetches seven-day ranges and refetches a changed window after the throttle', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      const card = await mount(full({ show_bars: ['moisture'], history_period: '7d' }), hass);
+      await settle(card);
+      expect(calls(hass)[0].args[0].start_time).to.equal(new Date(Date.now() - 7 * 86400000).toISOString());
+      expect(rows(card)[0].periodLabel).to.equal('Last 7 d');
+      expect(query(card, '.tile-btn').getAttribute('aria-label')).to.equal(describeWithStats(rows(card)[0].measurement, rows(card)[0].stats, 'last 7 days'));
+      card.setConfig(full({ show_bars: ['moisture'], history_period: '24h' }));
+      await settle(card);
+      await clock.tickAsync(59999);
+      expect(calls(hass)).to.have.length(1);
+      await clock.tickAsync(1);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      expect(calls(hass)[1].args[0].start_time).to.equal(new Date(Date.now() - 86400000).toISOString());
+      expect(rows(card)[0].periodLabel).to.equal('Last 24 h');
+      card.remove();
+    });
+
+    it('refetches when a sensor changes from range to cumulative history', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      const card = await mount(full({ show_bars: ['dli'] }), hass);
+      await settle(card);
+      expect(calls(hass)[0].args[0].period).to.equal('hour');
+      assign(card, { ...hass, states: { ...hass.states, 'sensor.dli': state('25', { state_class: 'total_increasing' }) } });
+      await settle(card);
+      await clock.tickAsync(60000);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      expect(calls(hass)[1].args[0].period).to.equal('day');
+      expect(rows(card)[0].stats).to.deep.equal({ min: 8, max: 12, mean: 10 });
+      card.remove();
+    });
+
+    it('preserves both previous history maps when either group fails', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      hass.states['sensor.dli'] = state('0.7', { state_class: 'total_increasing' });
+      const card = await mount(full({ show_bars: ['moisture', 'dli'] }), hass);
+      await settle(card);
+      hass.callWS.onCall(hass.callWS.callCount).resolves({ 'sensor.moisture': [{ min: 1, max: 99, mean: 50 }] });
+      hass.callWS.onCall(hass.callWS.callCount + 1).rejects(new Error('offline'));
+      await clock.tickAsync(600000);
+      await settle(card);
+      expect(rows(card)[0].stats).to.deep.equal({ min: 15, max: 35, mean: 25 });
+      expect(rows(card)[1].stats).to.deep.equal({ min: 8, max: 12, mean: 10 });
       card.remove();
     });
 

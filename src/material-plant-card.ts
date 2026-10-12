@@ -8,7 +8,7 @@ import { configForm } from './config-form';
 import { themeTokens } from './theme';
 import './gauge/plant-gauge';
 import './battery/battery-glyph';
-import { fetch24hStats, withCurrent, type Stats24h } from './data/history-stats';
+import { fetchHistoryStats, withCurrent, type HistoryResult, type HistoryWindow } from './data/history-stats';
 import { describeWithStats } from './full/metric-row';
 
 const REFRESH_INTERVAL = 5000;
@@ -43,7 +43,7 @@ export class MaterialPlantCard extends LitElement {
   @state() private _info?: PlantInfo;
   @state() private _failedSrc?: string;
   @state() private _gaugeCapacity = 6;
-  @state() private _statsMap: Record<string, Stats24h> = {};
+  @state() private _statsMap: HistoryResult = { range: {}, dailyTotals: {}, failed: false };
   private _statsKey?: string;
   private _statsRequest = 0;
   private _statsLastFetch = -Infinity;
@@ -222,10 +222,24 @@ export class MaterialPlantCard extends LitElement {
     this._syncStats();
   }
 
-  private _statsSensors(): string[] {
-    if (!this.hass || !this._config || !this.hass.states[this._config.entity]) return [];
-    return [...new Set(buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states)
-      .flatMap((m) => m.sensor ? [m.sensor] : []))];
+  private _historyWindow(): HistoryWindow {
+    return this._config?.history_period === '7d' ? '7d' : '24h';
+  }
+
+  private _isCumulative(sensor?: string): boolean {
+    const stateClass = sensor ? this.hass?.states[sensor]?.attributes.state_class : undefined;
+    return stateClass === 'total' || stateClass === 'total_increasing';
+  }
+
+  private _statsSensors(): { range: string[]; dailyTotals: string[] } {
+    const range = new Set<string>();
+    const dailyTotals = new Set<string>();
+    if (this.hass && this._config && this.hass.states[this._config.entity]) {
+      for (const m of buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states)) {
+        if (m.sensor) (this._isCumulative(m.sensor) ? dailyTotals : range).add(m.sensor);
+      }
+    }
+    return { range: [...range], dailyTotals: [...dailyTotals] };
   }
 
   private _stopStats(dropMap = false): void {
@@ -237,7 +251,9 @@ export class MaterialPlantCard extends LitElement {
     if (dropMap) {
       this._statsKey = undefined;
       this._statsPending = true;
-      if (Object.keys(this._statsMap).length) this._statsMap = {};
+      if (Object.keys(this._statsMap.range).length || Object.keys(this._statsMap.dailyTotals).length) {
+        this._statsMap = { range: {}, dailyTotals: {}, failed: false };
+      }
     }
   }
 
@@ -248,13 +264,14 @@ export class MaterialPlantCard extends LitElement {
     }
     if (!this.isConnected || !this.hass || !this._info || !this._config) return;
     const sensors = this._statsSensors();
-    const key = JSON.stringify([this._config.entity, [...sensors].sort()]);
+    const window = this._historyWindow();
+    const key = JSON.stringify([this._config.entity, window, [...sensors.range].sort(), [...sensors.dailyTotals].sort()]);
     if (key !== this._statsKey) {
       this._statsKey = key;
       this._statsRequest++;
       this._statsPending = true;
     }
-    if (!sensors.length) {
+    if (!sensors.range.length && !sensors.dailyTotals.length) {
       clearTimeout(this._statsTimer);
       this._statsTimer = undefined;
       return;
@@ -263,7 +280,7 @@ export class MaterialPlantCard extends LitElement {
     const wait = this._statsPending ? Math.max(0, STATS_THROTTLE - elapsed) : Math.max(0, STATS_INTERVAL - elapsed);
     clearTimeout(this._statsTimer);
     this._statsTimer = undefined;
-    if (wait === 0) void this._fetchStats(sensors);
+    if (wait === 0) void this._fetchStats(sensors, window);
     else this._statsTimer = setTimeout(() => {
       this._statsTimer = undefined;
       this._statsPending = true;
@@ -271,21 +288,18 @@ export class MaterialPlantCard extends LitElement {
     }, wait);
   }
 
-  private async _fetchStats(sensors: string[]): Promise<void> {
+  private async _fetchStats(sensors: { range: string[]; dailyTotals: string[] }, window: HistoryWindow): Promise<void> {
     const hass = this.hass!;
     const request = ++this._statsRequest;
     this._statsInFlight = request;
     this._statsPending = false;
     this._statsLastFetch = Date.now();
     this._syncStats();
-    // The data helper returns {} on errors; distinguish failures from valid empty history.
-    let failed = false;
-    const result = await fetch24hStats({ callWS: async <T>(message: Record<string, unknown>): Promise<T> => {
-      try { return await hass.callWS<T>(message as { type: string }); }
-      catch (error) { failed = true; throw error; }
-    } }, sensors, this._statsLastFetch);
+    const result = await fetchHistoryStats({
+      callWS: <T>(message: Record<string, unknown>): Promise<T> => hass.callWS<T>(message as { type: string }),
+    }, { ...sensors, window }, this._statsLastFetch);
     if (request === this._statsRequest && this.isConnected) {
-      if (!failed) this._statsMap = result;
+      if (!result.failed) this._statsMap = result;
     }
     if (this._statsInFlight === request) this._statsInFlight = undefined;
     this._syncStats();
@@ -514,11 +528,18 @@ export class MaterialPlantCard extends LitElement {
             </button>` : nothing}
         </div>
         ${!compact && measurements.length ? html`<div class="tiles">${measurements.map((m) => {
-          const stats = cfg.hide_history ? null : withCurrent(m.sensor ? this._statsMap[m.sensor] ?? null : null, m.value);
-          const tone = toneFor(m, problems);
-          return html`<button class=${`tile-btn${tone === 'problem' ? ' problem' : ''}`} type="button" aria-label=${describeWithStats(m, stats)}
+          const cumulative = this._isCumulative(m.sensor);
+          const window = this._historyWindow();
+          const stats = cfg.hide_history ? null : cumulative
+            ? (m.sensor ? this._statsMap.dailyTotals[m.sensor] ?? null : null)
+            : withCurrent(m.sensor ? this._statsMap.range[m.sensor] ?? null : null, m.value);
+          const problemTone = toneFor(m, problems);
+          const tone = !cumulative && (m.status === 'low' || m.status === 'high') ? 'problem' : problemTone;
+          const periodLabel = cumulative ? 'Daily · 7 d' : window === '7d' ? 'Last 7 d' : 'Last 24 h';
+          const period = cumulative ? 'daily totals, last 7 days' : window === '7d' ? 'last 7 days' : 'last 24 h';
+          return html`<button class=${`tile-btn${problemTone === 'problem' ? ' problem' : ''}`} type="button" aria-label=${describeWithStats(m, stats, period)}
             @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}>
-            <mpl-metric-row .measurement=${m} .tone=${tone} .stats=${stats} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
+            <mpl-metric-row .measurement=${m} .tone=${tone} .stats=${stats} .periodLabel=${periodLabel} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
           </button>`;
         })}</div>` : nothing}
         ${compact && measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
