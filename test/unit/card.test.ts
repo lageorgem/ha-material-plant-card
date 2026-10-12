@@ -7,6 +7,7 @@ import { configForm } from '../../src/config-form';
 
 const ENTITY = 'plant.test';
 const BATTERY = 'sensor.battery';
+const IMAGE = '/test/fixtures/plant.svg';
 type TestState = { state: string; attributes: Record<string, unknown>; last_updated: string };
 const state = (value = 'ok', attributes: Record<string, unknown> = {}, updated = '0'): TestState =>
   ({ state: value, attributes, last_updated: updated });
@@ -126,6 +127,54 @@ describe('material-plant-card', () => {
     expect(query(card, '.subtitle').textContent).to.include('Moisture low');
   });
 
+  it('switches conflicting plant and gauge problems with problem_source', async () => {
+    const hass = fakeHass();
+    hass.states[ENTITY] = state('problem', {
+      species: 'Phalaenopsis', problems: [{ sensor_type: 'moisture', status: 'High' }],
+    });
+    hass.states['sensor.moisture'] = state('5');
+    hass.states['sensor.temperature'] = state('60');
+    const card = await mount(cfg({ show_bars: ['moisture', 'temperature'], problem_source: 'plant' }), hass);
+    expect(query(card, '.subtitle').textContent).to.equal('Moisture high');
+    expect(query(card, '.problem-badge')).not.to.equal(null);
+    expect(gauges(card)[0]).to.have.property('tone', 'problem');
+    expect(gauges(card)[1]).to.have.property('tone', 'advisory');
+    card.setConfig(cfg({ show_bars: ['moisture', 'temperature'], problem_source: 'gauges' }));
+    await settle(card);
+    expect(query(card, '.subtitle').textContent).to.equal('Moisture low · Temperature high');
+    expect(query(card, '.problem-badge')).not.to.equal(null);
+    expect(gauges(card)[0]).to.have.property('tone', 'problem');
+    expect(gauges(card)[1]).to.have.property('tone', 'problem');
+  });
+
+  for (const source of ['plant', 'gauges'] as const) {
+    it(`filters ${source} problem subtitles, badges and gauge tones with problem_sensors`, async () => {
+      const hass = fakeHass();
+      hass.states[ENTITY] = state('problem', { species: 'Phalaenopsis', problems: [
+        { sensor_type: 'moisture', status: 'Low' },
+        { sensor_type: 'temperature', status: 'High' },
+      ] });
+      hass.states['sensor.moisture'] = state('5');
+      hass.states['sensor.temperature'] = state('60');
+      const config = cfg({ show_bars: ['moisture', 'temperature'], problem_source: source });
+      const card = await mount(config, hass);
+      expect(gauges(card)[0]).to.have.property('tone', 'problem');
+      expect(gauges(card)[1]).to.have.property('tone', 'problem');
+      card.setConfig({ ...config, problem_sensors: ['temperature'] });
+      await settle(card);
+      expect(query(card, '.subtitle').textContent).to.equal('Temperature high');
+      expect(query(card, '.problem-badge')).not.to.equal(null);
+      expect(gauges(card)[0]).to.have.property('tone', 'advisory');
+      expect(gauges(card)[1]).to.have.property('tone', 'problem');
+      card.setConfig({ ...config, problem_sensors: ['illuminance'] });
+      await settle(card);
+      expect(query(card, '.subtitle').textContent).to.equal('Phalaenopsis');
+      expect(query(card, '.problem-badge')).to.equal(null);
+      expect(gauges(card)[0]).to.have.property('tone', 'advisory');
+      expect(gauges(card)[1]).to.have.property('tone', 'advisory');
+    });
+  }
+
   it('hides species when requested and in compact mode', async () => {
     for (const config of [cfg({ hide_species: true }), cfg({ display_type: 'compact' })]) {
       expect(query(await mount(config), '.subtitle')).to.equal(null);
@@ -150,9 +199,13 @@ describe('material-plant-card', () => {
 
   it('uses configured battery thresholds', async () => {
     const hass = fakeHass();
-    hass.states[BATTERY] = state('30');
     const card = await mount(cfg({ battery_sensor: BATTERY, battery_warn_level: 35, battery_ok_level: 60 }), hass);
-    expect(query(card, '.battery').getAttribute('data-tone')).to.equal('low');
+    for (const [value, tone] of [['34', 'low'], ['35', 'warn'], ['59', 'warn'], ['60', 'ok']]) {
+      assign(card, { ...hass, states: { ...hass.states, [BATTERY]: state(value) } });
+      await settle(card);
+      expect(query(card, '.battery').getAttribute('data-tone'), `battery ${value}%`).to.equal(tone);
+      expect(query(card, '.battery').textContent!.trim()).to.equal(`${value}%`);
+    }
   });
 
   it('dispatches composed more-info for plant, battery, sensor and sensorless gauge', async () => {
@@ -206,6 +259,44 @@ describe('material-plant-card', () => {
     card.remove();
   });
 
+  for (const timing of ['during the throttle window', 'after the trailing response']) {
+    it(`ignores an old same-entity response ${timing}`, async () => {
+      const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      const hass = fakeHass({ temperature: info.temperature });
+      let resolveOld!: (response: { result: PlantInfo }) => void;
+      hass.callWS.onSecondCall().returns(new Promise((resolve) => { resolveOld = resolve; }));
+      hass.callWS.onThirdCall().resolves({ result: { moisture: info.moisture } });
+      const card = await mount(cfg(), hass);
+      await clock.tickAsync(5000);
+      assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, '1') } });
+      await settle(card);
+      expect(hass.callWS.callCount).to.equal(2);
+      await clock.tickAsync(1000);
+      assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, '2') } });
+      await settle(card);
+      if (timing === 'during the throttle window') {
+        resolveOld({ result: { conductivity: info.conductivity } });
+        await settle(card);
+      }
+      expect(hass.callWS.callCount).to.equal(2);
+      expect(gauges(card)).to.have.length(1);
+      expect(gauges(card)[0]).to.have.property('label').that.matches(/^Temperature:/);
+      await clock.tickAsync(4000);
+      await settle(card);
+      expect(hass.callWS.callCount).to.equal(3);
+      expect(hass.callWS.args.every(([request]) => request.entity_id === ENTITY)).to.equal(true);
+      expect(gauges(card)).to.have.length(1);
+      expect(gauges(card)[0]).to.have.property('label').that.matches(/^Moisture:/);
+      if (timing === 'after the trailing response') {
+        resolveOld({ result: { conductivity: info.conductivity } });
+        await settle(card);
+        expect(gauges(card)).to.have.length(1);
+        expect(gauges(card)[0]).to.have.property('label').that.matches(/^Moisture:/);
+      }
+      card.remove();
+    });
+  }
+
   it('keeps last good info when a later request fails, including synchronous throws', async () => {
     const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const hass = fakeHass();
@@ -244,14 +335,14 @@ describe('material-plant-card', () => {
   });
 
   it('falls back to masked placeholder on image error and retries a new source', async () => {
-    const card = await mount(cfg({ image: '/first.jpg' }));
+    const card = await mount(cfg({ image: `${IMAGE}?first` }));
     query(card, 'img').dispatchEvent(new Event('error'));
     await settle(card);
     expect(query(card, 'img')).to.equal(null);
     expect(query(card, '.placeholder')).not.to.equal(null);
-    card.setConfig(cfg({ image: '/second.jpg' }));
+    card.setConfig(cfg({ image: `${IMAGE}?second` }));
     await settle(card);
-    expect(query(card, 'img').getAttribute('src')).to.equal('/second.jpg');
+    expect(query(card, 'img').getAttribute('src')).to.equal(`${IMAGE}?second`);
     card.setConfig(cfg({ hide_image: true }));
     await settle(card);
     expect(query(card, '.image-btn')).to.equal(null);
@@ -259,12 +350,12 @@ describe('material-plant-card', () => {
 
   it('uses entity picture without rewriting relative paths, with config override', async () => {
     const hass = fakeHass();
-    hass.states[ENTITY] = state('ok', { entity_picture: '/api/plant.jpg' });
+    hass.states[ENTITY] = state('ok', { entity_picture: IMAGE });
     const card = await mount(cfg(), hass);
-    expect(query(card, 'img').getAttribute('src')).to.equal('/api/plant.jpg');
-    card.setConfig(cfg({ image: '/override.jpg' }));
+    expect(query(card, 'img').getAttribute('src')).to.equal(IMAGE);
+    card.setConfig(cfg({ image: `${IMAGE}?override` }));
     await settle(card);
-    expect(query(card, 'img').getAttribute('src')).to.equal('/override.jpg');
+    expect(query(card, 'img').getAttribute('src')).to.equal(`${IMAGE}?override`);
   });
 
   it('uses live sensor values without refetching unchanged plant timestamps', async () => {
