@@ -19,8 +19,8 @@ hide_image: false
 hide_units: false
 image: /local/plants/orchid.jpg
 battery_sensor: sensor.sh_5_battery
-battery_warn_level: 20
-battery_ok_level: 40
+# Bare battery glyph turns red below this percentage; otherwise neutral.
+battery_warn_level: 10
 problem_source: plant
 # Empty/omitted allows all measurements; this example selects two.
 problem_sensors:

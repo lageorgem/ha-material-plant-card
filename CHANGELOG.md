@@ -5,17 +5,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.1.0] - 2026-10-12
 
-First public release.
+Unreleased — first public release in preparation.
 
 ### Added
 
-- Material 3 Expressive plant card for Olen's plant monitor integration, with circular three-zone range gauges, a thick in-range band, thin low/high zones, active arcs and position dots.
-- Primary, advisory/tertiary and problem/error gauge tones; logarithmic illuminance scaling for lux readings with positive minimum thresholds.
+- Material 3 Expressive plant card for Olen's plant monitor integration, with circular three-zone range gauges, active arcs and position dots. Coloured fill follows the track's thin low/high zones, thick just-right band and the same gaps.
+- Success gauge colour in range (`--md-sys-color-success`, falling back to `--success-color`), neutral on-surface-variant out of range without a problem, and error colour for problems with bold, error-coloured value text. Logarithmic illuminance scaling for lux readings with positive minimum thresholds.
 - Support for moisture, conductivity, temperature, illuminance, humidity, DLI, 24-hour DLI, CO₂, soil temperature and VPD measurements supplied by the integration.
-- Cookie-shaped plant photos with configurable image override and a missing/broken-image placeholder; plant name, species or problem summary, and a photo alert badge.
-- Integration-driven problems by default, optional out-of-range gauge problems, and measurement filtering through `problem_sensors`.
-- Optional battery percentage chip with configurable warning and OK thresholds, plus sensor and plant more-info interactions.
+- Cookie-shaped plant photos with configurable image override and a missing/broken-image placeholder; plant name, species or problem summary, and a red error circle with a centred **!** on the photo.
+- Integration-driven problems by default (low illuminance at night can remain neutral), optional out-of-range gauge problems, and measurement filtering through `problem_sensors`.
+- Optional bare iOS-style battery glyph with the level number inside; error colour below `battery_warn_level` (default 10%), otherwise neutral. `battery_ok_level` is accepted but ignored for flower-card compatibility and removed from the visual editor.
+- Two-line Material plain gauge tooltips: `<Metric>[ · too low/high]` and `<value> <unit> · ideal <min>–<max> <unit>`. Touch long-press (about 0.45 s), mouse hover (0.5 s) and keyboard focus show the tooltip; Escape dismisses. Normal taps open sensor more-info; long-presses do not. Photo/name and battery taps open their respective more-info dialogs.
 - Full and compact layouts, configurable gauge order and visibility, and `hide_units` to hide complete gauge value text.
+- Width-measured, balanced gauge rows when gauges do not fit one row, with the extra on the first row and the last row centred (two-row examples: 5 → 3/2, 6 → 3/3, 7 → 4/3). Six-gauge footprint unchanged at 327 × 160 px at 327 px width.
 - Home Assistant visual configuration form with Gauges, Problems and Appearance sections.
 - Material You theme tokens with Home Assistant theme fallbacks and reduced-motion support.
 - Flower-card-compatible configuration keys, with `bars_per_row`, `show_care` and `extra_badges` accepted and ignored; independent implementation with no shared code.

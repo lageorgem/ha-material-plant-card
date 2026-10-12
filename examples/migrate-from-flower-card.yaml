@@ -1,5 +1,7 @@
 # Before/after reference: paste one mapping into the dashboard card editor,
-# not this whole document. Only type changes; keep your entity IDs and options.
+# not this whole document. Changing type is sufficient; the after block also
+# removes the ignored legacy OK threshold. Keep your entity IDs and options.
+# battery_ok_level is accepted but ignored and absent from the visual editor.
 # bars_per_row, show_care and extra_badges are accepted but ignored by the new card.
 # hide_units: true hides complete gauge value text in Material Plant Card.
 # Migration: https://github.com/lageorgem/ha-material-plant-card#flower-card-compatibility
@@ -14,6 +16,7 @@ before:
   hide_image: false
   hide_units: false
   battery_sensor: sensor.sh_5_battery
+  battery_ok_level: 40
   bars_per_row: 6
   show_care: []
   extra_badges: []
@@ -28,6 +31,8 @@ after:
   hide_image: false
   hide_units: false
   battery_sensor: sensor.sh_5_battery
+  # Default: red below 10%; otherwise neutral, with the number inside the glyph.
+  battery_warn_level: 10
   bars_per_row: 6
   show_care: []
   extra_badges: []

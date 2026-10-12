@@ -1,6 +1,6 @@
 # Material Plant Card
 
-A [Home Assistant](https://www.home-assistant.io/) Lovelace plant card built for **Material 3 Expressive**, with circular range gauges, plant problem summaries and a battery chip. Requires [Olen's plant monitor integration](https://github.com/Olen/homeassistant-plant).
+A [Home Assistant](https://www.home-assistant.io/) Lovelace plant card built for **Material 3 Expressive**, with circular range gauges, plant problem summaries and a battery indicator. Requires [Olen's plant monitor integration](https://github.com/Olen/homeassistant-plant).
 
 Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha-material-thermostat-card), [Material Purifier Card](https://github.com/lageorgem/ha-material-purifier-card) and [Nerwyn's Material You theme](https://github.com/Nerwyn/material-you-theme), with Home Assistant theme fallbacks.
 
@@ -36,10 +36,11 @@ Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha
 ## Highlights
 
 - Circular gauges with three zones: **too low / just right / too high**, a thick in-range band, thin outer zones, an active arc and a position dot.
-- Primary colour for in-range readings, tertiary for out-of-range advice, error colour for problems.
-- Plant photo in an M3 Expressive cookie shape, with a placeholder for missing or broken images and an alert badge when problems exist.
+- Success colour for in-range readings, neutral for out-of-range advice, error colour for problems with bold, error-coloured value text.
+- Plant photo in an M3 Expressive cookie shape, with a placeholder for missing or broken images and a red error circle with a centred **!** when problems exist.
 - Name and species, or a problem summary such as **Moisture low · DLI low**.
-- Optional battery chip with OK, warning and low tones.
+- Optional iOS-style battery glyph with the level number inside; red below 10% by default, otherwise neutral.
+- Width-aware, balanced gauge rows and two-line Material plain tooltips on long-press, hover or keyboard focus.
 - Full and compact displays; visual editor with **Gauges**, **Problems** and **Appearance** sections.
 - Config-compatible with flower-card; migrate by changing the card type.
 
@@ -108,9 +109,9 @@ Defaults apply when keys are omitted. Only `type` and `entity` are required; eve
 | `hide_image` | boolean, optional | `false` | Hide the photo/placeholder and its alert badge. | `true` |
 | `hide_units` | boolean, optional | `false` in full; `true` in compact | Despite its compatibility name, hides the **entire value text** below gauges, not just unit suffixes. | `false` |
 | `image` | string, optional | Plant `entity_picture` | Picture URL or path override. A missing or broken image displays a placeholder. | `/local/plants/orchid.jpg` |
-| `battery_sensor` | string, optional | Unset; no chip | Battery percentage sensor. Chip is shown only if the entity exists. | `sensor.sh_5_battery` |
-| `battery_warn_level` | number, optional | `20` | Battery levels below this threshold use the low/error tone. | `20` |
-| `battery_ok_level` | number, optional | `40` | Battery levels at or above this threshold use the OK tone. | `40` |
+| `battery_sensor` | string, optional | Unset; no indicator | Battery percentage sensor. Glyph is shown only if the entity exists. | `sensor.sh_5_battery` |
+| `battery_warn_level` | number, optional | `10` | Battery levels below this threshold use the error colour; otherwise neutral. | `10` |
+| `battery_ok_level` | number, optional | Unset; ignored (flower-card compatibility) | Accepted but has no effect; not shown in the visual editor. | `40` (legacy config) |
 | `problem_source` | `plant` or `gauges`, optional | `plant` | Follow integration problems or flag displayed out-of-range gauges. | `gauges` |
 | `problem_sensors` | string list, optional | All measurements | Measurement keys allowed to raise a problem; omitted or `[]` allows all. | `[moisture, dli]` |
 | `bars_per_row` | number, optional | Unset; ignored | Accepted for flower-card compatibility; does not control layout. | `6` |
@@ -138,24 +139,29 @@ Only measurements supplied by the integration are displayed. A measurement is al
 
 ## Reading the gauges
 
-The thick middle band represents the plant's min/max range, including both boundaries. Thin bands on either side represent low and high readings. The active arc and dot show the current position; values beyond the gauge's visual extent are clamped at the ends.
+The thick middle band represents the plant's min/max range, including both boundaries. Thin bands on either side represent low and high readings. The coloured fill follows the track: thin in the too-low/too-high zones, thick in the just-right band, with the same gaps between zones. The active arc and dot show the current position; values beyond the gauge's visual extent are clamped at the ends.
 
 Illuminance uses a logarithmic scale when the unit is `lx` and the minimum is positive. Other readings use a linear scale. These are range indicators, not percentages of a universal sensor maximum.
 
 | Colour / state | Meaning |
 | --- | --- |
-| Primary | Reading is in range. |
-| Tertiary | Reading is out of range but is not a selected problem. |
-| Error | Reading is out of range and is a selected problem. |
+| Success | Reading is in range. Uses `--md-sys-color-success`, falling back to `--success-color`. |
+| Neutral (on-surface-variant) | Reading is out of range but is not a selected problem. |
+| Error | Reading is out of range and is a selected problem; value text below is also error-coloured and bold. |
 | No active arc or dot | Value or valid min/max range is unavailable. |
 
 Value text is rounded for space; large readings use `k` (for example, `30000` becomes `30k`). Only percentage and degree suffixes are shown below gauges; the tooltip and accessible label include the full unit and range. A non-numeric value displays `—` when value text is enabled. `hide_units: true` removes that text completely.
 
-Tap a gauge to open more-info for its sensor, or for the plant if no sensor is supplied. Tap the photo or name to open plant more-info; tap the battery chip to open battery sensor more-info. No configurable hold or double-tap actions are provided.
+Each gauge has a Material plain tooltip with two lines:
+
+1. `<Metric>[ · too low/high]` — the status suffix appears only for out-of-range readings.
+2. `<value> <unit> · ideal <min>–<max> <unit>` — for example, `18 % · ideal 20–60 %`. Missing values show `—`; unavailable thresholds omit the ideal range.
+
+Show it with a touch long-press (about 0.45 s), mouse hover (0.5 s) or keyboard focus. **Escape** dismisses it. A normal tap opens more-info for the sensor, or for the plant if no sensor is supplied; a long-press shows the tooltip without opening more-info. Tap the photo or name to open plant more-info; tap the battery glyph to open battery sensor more-info. No configurable hold or double-tap actions are provided.
 
 ## Choosing problem behaviour
 
-**`problem_source: plant` (default)** follows the integration's per-sensor problem triggers. An illuminance reading may be low at night without being a problem: its gauge remains advisory rather than error-coloured. Integration problems can appear in the header even when their gauges are not displayed.
+**`problem_source: plant` (default)** follows the integration's per-sensor problem triggers. An illuminance reading may be low at night without being a problem: its gauge remains neutral (on-surface-variant) rather than error-coloured. Integration problems can appear in the header even when their gauges are not displayed.
 
 **`problem_source: gauges`** flags any displayed gauge whose value is below its minimum or above its maximum. Missing values or invalid ranges do not raise gauge problems. `show_bars` therefore limits the measurements considered in this mode.
 
@@ -170,20 +176,19 @@ problem_sensors: [moisture, dli]
 
 An omitted or empty list allows all measurements. If the integration reports `state: problem` without a structured `problems` list, the header falls back to **Needs attention**; that generic fallback cannot be filtered by measurement key.
 
-Problems replace species in the subtitle and add an error-coloured badge to the photo. Hiding species does not hide problems.
+Problems replace species in the subtitle and add a red error circle with a centred **!** to the photo. Hiding species does not hide problems.
 
 ## Battery indicator
 
-Set `battery_sensor` to a sensor reporting a numeric percentage. With the default thresholds:
+Set `battery_sensor` to a sensor reporting a numeric percentage. The indicator is a bare iOS-style battery glyph with the level number inside, without an enclosing container. With the default `battery_warn_level: 10`:
 
 | Level | Tone |
 | --- | --- |
-| Below 20% | Low, error colour |
-| 20% to below 40% | Warning, tertiary colour |
-| 40% or higher | OK, normal text colour |
-| Unknown or non-numeric | Unknown icon and `—` |
+| Below 10% | Red, error colour |
+| 10% or higher | Neutral (on-surface-variant) |
+| Unknown or non-numeric | Neutral outline colour with `?` inside |
 
-The displayed percentage is rounded and clamped to 0–100. Choose thresholds between 0 and 100, with the warning threshold below the OK threshold. Battery tones do not create plant problems or an alert badge.
+The displayed percentage is rounded and clamped to 0–100. Choose `battery_warn_level` between 0 and 100. `battery_ok_level` is accepted but ignored for flower-card compatibility and is no longer in the visual editor. Battery tones do not create plant problems or an alert badge.
 
 ## Flower-card compatibility
 
@@ -199,15 +204,15 @@ to:
 type: custom:material-plant-card
 ```
 
-Keep the remaining configuration. `bars_per_row`, `show_care` and `extra_badges` are accepted and ignored: there are no care panels or extra badges, and gauge layout is automatic. `hide_units` hides the complete value text. See the [before/after example](examples/migrate-from-flower-card.yaml).
+Keep the remaining configuration. `battery_ok_level`, `bars_per_row`, `show_care` and `extra_badges` are accepted and ignored: there is no OK battery threshold, no care panels or extra badges, and gauge layout is automatic. You can remove these ignored keys, as shown in the [before/after example](examples/migrate-from-flower-card.yaml). `hide_units` hides the complete value text. An omitted `battery_warn_level` defaults to 10%.
 
 This is an independent implementation inspired by flower-card; no code is shared.
 
 ## Layout & responsiveness
 
-The full card measured **327 × 160 px**, versus flower-card's **327 × 203 px**, at the same column width with six gauges. This is a measured example, not a fixed height: gauge count, available width and content affect sizing.
+The full card footprint remains **327 × 160 px** at 327 px width with six gauges, versus flower-card's **327 × 203 px**. This is a measured example, not a fixed height: gauge count, available width and content affect sizing.
 
-Up to six gauges share a row when space permits; additional gauges form multiple rows, and narrow cards wrap automatically. `bars_per_row` is ignored. Use `display_type: compact` for a 40 px photo instead of 56 px, no species line and hidden gauge value text by default. Set `hide_units: false` to restore values in compact display.
+The card measures its width to decide how many gauges fit a row. If they do not fit one row, it balances them across rows, with the extra gauge on the first row and the last row centred. For two-row layouts: five gauges split **3/2**, six **3/3**, and seven **4/3**. At 327 px width, six gauges still fit one row. `bars_per_row` is ignored. Use `display_type: compact` for a 40 px photo instead of 56 px, no species line and hidden gauge value text by default. Set `hide_units: false` to restore values in compact display.
 
 ## Theming
 
@@ -224,7 +229,7 @@ Use [Nerwyn's Material You theme](https://github.com/Nerwyn/material-you-theme) 
 | Gauge has no active indicator | Check that the sensor value and min/max thresholds are numeric and that minimum is below maximum. |
 | Out-of-range gauge is not red | Default problem behaviour follows the integration's triggers. Check those triggers and `problem_sensors`, or use `problem_source: gauges`. |
 | Values disappear in compact display | Set `hide_units: false`; compact hides all value text by default. |
-| No battery chip | Set `battery_sensor` and confirm that entity exists. Battery is not auto-detected. |
+| No battery indicator | Set `battery_sensor` and confirm that entity exists. Battery is not auto-detected. |
 | Photo shows a placeholder | Check `image` or the plant's `entity_picture` and whether the browser can load it. |
 
 ## Development
