@@ -338,7 +338,7 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
-    it('preserves both previous history maps when either group fails', async () => {
+    it('updates range history while preserving daily totals when their request fails', async () => {
       const clock = clockForStats();
       const hass = fakeHass();
       hass.states['sensor.dli'] = state('0.7', { state_class: 'total_increasing' });
@@ -348,9 +348,47 @@ describe('material-plant-card', () => {
       hass.callWS.onCall(hass.callWS.callCount + 1).rejects(new Error('offline'));
       await clock.tickAsync(600000);
       await settle(card);
-      expect(rows(card)[0].stats).to.deep.equal({ min: 15, max: 35, mean: 25 });
+      expect(rows(card)[0].stats).to.deep.equal({ min: 1, max: 99, mean: 50 });
       expect(rows(card)[1].stats).to.deep.equal({ min: 8, max: 12, mean: 10 });
       card.remove();
+    });
+
+    it('applies successful groups on first load and refresh while retaining only failed groups', async () => {
+      const clock = clockForStats();
+      const hass = illuminanceHass();
+      hass.states['sensor.dli'] = state('0.7', { state_class: 'total_increasing' });
+      hass.callWS.onCall(3).rejects(new Error('daytime offline'));
+      const card = await mount(full({ show_bars: ['moisture', 'dli', 'illuminance'] }), hass);
+      await settle(card);
+      expect(rows(card).map((row) => row.stats)).to.deep.equal([
+        { min: 15, max: 35, mean: 25 }, { min: 8, max: 12, mean: 10 }, null,
+      ]);
+
+      await clock.tickAsync(600000);
+      await settle(card);
+      expect(rows(card)[2].stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
+
+      const nextCall = hass.callWS.callCount;
+      hass.callWS.onCall(nextCall).rejects(new Error('range offline'));
+      hass.callWS.onCall(nextCall + 1).resolves({ 'sensor.dli': [{ end: Date.now(), change: 20 }] });
+      hass.callWS.onCall(nextCall + 2).callsFake(async () => ({
+        'sensor.illuminance': [{ s: '6000', lu: Date.now() / 1000 - 3600 }],
+      }));
+      await clock.tickAsync(600000);
+      await settle(card);
+      expect(rows(card).map((row) => row.stats)).to.deep.equal([
+        { min: 15, max: 35, mean: 25 }, { min: 20, max: 20, mean: 20 }, { min: 6000, max: 6000, mean: 6000 },
+      ]);
+
+      hass.callWS.onCall(hass.callWS.callCount + 2).rejects(new Error('daytime offline'));
+      hass.callWS.onCall(hass.callWS.callCount).resolves({ 'sensor.moisture': [{ min: 1, max: 99, mean: 50 }] });
+      await clock.tickAsync(600000);
+      await settle(card);
+      expect(rows(card).map((row) => row.stats)).to.deep.equal([
+        { min: 1, max: 99, mean: 50 }, { min: 8, max: 12, mean: 10 }, { min: 6000, max: 6000, mean: 6000 },
+      ]);
+      card.remove();
+      expect(clock.countTimers()).to.equal(0);
     });
 
     it('waits for info then fetches only rendered sensor ids once and extends stats with live values', async () => {

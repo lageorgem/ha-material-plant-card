@@ -43,7 +43,10 @@ export class MaterialPlantCard extends LitElement {
   @state() private _info?: PlantInfo;
   @state() private _failedSrc?: string;
   @state() private _gaugeCapacity = 6;
-  @state() private _statsMap: HistoryResult = { range: {}, dailyTotals: {}, daytime: {}, failed: false };
+  @state() private _statsMap: HistoryResult = {
+    range: {}, dailyTotals: {}, daytime: {}, failed: false,
+    failedGroups: { range: false, dailyTotals: false, daytime: false },
+  };
   private _statsKey?: string;
   private _statsRequest = 0;
   private _statsLastFetch = -Infinity;
@@ -258,7 +261,10 @@ export class MaterialPlantCard extends LitElement {
       this._statsKey = undefined;
       this._statsPending = true;
       if (Object.keys(this._statsMap.range).length || Object.keys(this._statsMap.dailyTotals).length || Object.keys(this._statsMap.daytime).length) {
-        this._statsMap = { range: {}, dailyTotals: {}, daytime: {}, failed: false };
+        this._statsMap = {
+          range: {}, dailyTotals: {}, daytime: {}, failed: false,
+          failedGroups: { range: false, dailyTotals: false, daytime: false },
+        };
       }
     }
   }
@@ -305,7 +311,12 @@ export class MaterialPlantCard extends LitElement {
       callWS: <T>(message: Record<string, unknown>): Promise<T> => hass.callWS<T>(message as { type: string }),
     }, { ...sensors, window }, this._statsLastFetch);
     if (request === this._statsRequest && this.isConnected) {
-      if (!result.failed) this._statsMap = result;
+      this._statsMap = {
+        ...result,
+        range: result.failedGroups.range ? this._statsMap.range : result.range,
+        dailyTotals: result.failedGroups.dailyTotals ? this._statsMap.dailyTotals : result.dailyTotals,
+        daytime: result.failedGroups.daytime ? this._statsMap.daytime : result.daytime,
+      };
     }
     if (this._statsInFlight === request) this._statsInFlight = undefined;
     this._syncStats();
