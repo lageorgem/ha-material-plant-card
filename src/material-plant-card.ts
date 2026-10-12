@@ -8,7 +8,7 @@ import { configForm } from './config-form';
 import { themeTokens } from './theme';
 import './gauge/plant-gauge';
 import './battery/battery-glyph';
-import { fetchHistoryStats, withCurrent, type HistoryResult, type HistoryWindow } from './data/history-stats';
+import { fetchHistoryStats, withCurrent, type HistoryRequest, type HistoryResult, type HistoryWindow } from './data/history-stats';
 import { describeWithStats } from './full/metric-row';
 
 const REFRESH_INTERVAL = 5000;
@@ -43,7 +43,7 @@ export class MaterialPlantCard extends LitElement {
   @state() private _info?: PlantInfo;
   @state() private _failedSrc?: string;
   @state() private _gaugeCapacity = 6;
-  @state() private _statsMap: HistoryResult = { range: {}, dailyTotals: {}, failed: false };
+  @state() private _statsMap: HistoryResult = { range: {}, dailyTotals: {}, daytime: {}, failed: false };
   private _statsKey?: string;
   private _statsRequest = 0;
   private _statsLastFetch = -Infinity;
@@ -231,15 +231,21 @@ export class MaterialPlantCard extends LitElement {
     return stateClass === 'total' || stateClass === 'total_increasing';
   }
 
-  private _statsSensors(): { range: string[]; dailyTotals: string[] } {
+  private _isDaytime(key: string, sensor?: string): boolean {
+    return this._config?.display_type !== 'compact' && this._config?.illuminance_daytime_only !== false &&
+      key === 'illuminance' && !this._isCumulative(sensor);
+  }
+
+  private _statsSensors(): Pick<HistoryRequest, 'range' | 'dailyTotals' | 'daytime'> {
     const range = new Set<string>();
     const dailyTotals = new Set<string>();
+    const daytime = new Set<string>();
     if (this.hass && this._config && this.hass.states[this._config.entity]) {
       for (const m of buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states)) {
-        if (m.sensor) (this._isCumulative(m.sensor) ? dailyTotals : range).add(m.sensor);
+        if (m.sensor) (this._isCumulative(m.sensor) ? dailyTotals : this._isDaytime(m.key, m.sensor) ? daytime : range).add(m.sensor);
       }
     }
-    return { range: [...range], dailyTotals: [...dailyTotals] };
+    return { range: [...range], dailyTotals: [...dailyTotals], daytime: [...daytime] };
   }
 
   private _stopStats(dropMap = false): void {
@@ -251,8 +257,8 @@ export class MaterialPlantCard extends LitElement {
     if (dropMap) {
       this._statsKey = undefined;
       this._statsPending = true;
-      if (Object.keys(this._statsMap.range).length || Object.keys(this._statsMap.dailyTotals).length) {
-        this._statsMap = { range: {}, dailyTotals: {}, failed: false };
+      if (Object.keys(this._statsMap.range).length || Object.keys(this._statsMap.dailyTotals).length || Object.keys(this._statsMap.daytime).length) {
+        this._statsMap = { range: {}, dailyTotals: {}, daytime: {}, failed: false };
       }
     }
   }
@@ -265,13 +271,13 @@ export class MaterialPlantCard extends LitElement {
     if (!this.isConnected || !this.hass || !this._info || !this._config) return;
     const sensors = this._statsSensors();
     const window = this._historyWindow();
-    const key = JSON.stringify([this._config.entity, window, [...sensors.range].sort(), [...sensors.dailyTotals].sort()]);
+    const key = JSON.stringify([this._config.entity, window, [...sensors.range].sort(), [...sensors.dailyTotals].sort(), [...sensors.daytime].sort()]);
     if (key !== this._statsKey) {
       this._statsKey = key;
       this._statsRequest++;
       this._statsPending = true;
     }
-    if (!sensors.range.length && !sensors.dailyTotals.length) {
+    if (!sensors.range.length && !sensors.dailyTotals.length && !sensors.daytime.length) {
       clearTimeout(this._statsTimer);
       this._statsTimer = undefined;
       return;
@@ -288,7 +294,7 @@ export class MaterialPlantCard extends LitElement {
     }, wait);
   }
 
-  private async _fetchStats(sensors: { range: string[]; dailyTotals: string[] }, window: HistoryWindow): Promise<void> {
+  private async _fetchStats(sensors: Pick<HistoryRequest, 'range' | 'dailyTotals' | 'daytime'>, window: HistoryWindow): Promise<void> {
     const hass = this.hass!;
     const request = ++this._statsRequest;
     this._statsInFlight = request;
@@ -529,14 +535,19 @@ export class MaterialPlantCard extends LitElement {
         </div>
         ${!compact && measurements.length ? html`<div class="tiles">${measurements.map((m) => {
           const cumulative = this._isCumulative(m.sensor);
+          const daytime = this._isDaytime(m.key, m.sensor);
           const window = this._historyWindow();
           const stats = cfg.hide_history ? null : cumulative
             ? (m.sensor ? this._statsMap.dailyTotals[m.sensor] ?? null : null)
-            : withCurrent(m.sensor ? this._statsMap.range[m.sensor] ?? null : null, m.value);
+            : withCurrent(m.sensor ? (daytime ? this._statsMap.daytime : this._statsMap.range)[m.sensor] ?? null : null,
+              daytime ? (m.value !== null && m.value > 0 ? m.value : null) : m.value);
           const problemTone = toneFor(m, problems);
-          const tone = !cumulative && (m.status === 'low' || m.status === 'high') ? 'problem' : problemTone;
-          const periodLabel = cumulative ? 'Daily · 7 d' : window === '7d' ? 'Last 7 d' : 'Last 24 h';
-          const period = cumulative ? 'daily totals, last 7 days' : window === '7d' ? 'last 7 days' : 'last 24 h';
+          const tone = !cumulative && !(daytime && m.value === 0) && (m.status === 'low' || m.status === 'high') ? 'problem' : problemTone;
+          const periodLabel = cumulative ? 'Daily · 7 d' : daytime
+            ? window === '7d' ? 'Daytime · 7 d' : 'Daytime · 24 h'
+            : window === '7d' ? 'Last 7 d' : 'Last 24 h';
+          const period = cumulative ? 'daily totals, last 7 days' :
+            `${daytime ? 'daytime, ' : ''}${window === '7d' ? 'last 7 days' : 'last 24 h'}`;
           return html`<button class=${`tile-btn${problemTone === 'problem' ? ' problem' : ''}`} type="button" aria-label=${describeWithStats(m, stats, period)}
             @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}>
             <mpl-metric-row .measurement=${m} .tone=${tone} .stats=${stats} .periodLabel=${periodLabel} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>

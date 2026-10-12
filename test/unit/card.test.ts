@@ -23,11 +23,20 @@ function fakeHass(data: PlantInfo = info) {
     [BATTERY]: state('19'),
     ...Object.fromEntries(DEFAULT_GAUGES.map((key) => [`sensor.${key}`, state('25')])),
   };
-  const callWS = sinon.stub().callsFake(async (msg: Record<string, unknown>) =>
-    msg.type === 'plant/get_info' ? { result: data } :
-      Object.fromEntries((msg.statistic_ids as string[]).map((id) => [id, msg.period === 'day'
+  const callWS = sinon.stub().callsFake(async (msg: Record<string, unknown>) => {
+    if (msg.type === 'plant/get_info') return { result: data };
+    if (msg.type === 'history/history_during_period') {
+      return Object.fromEntries((msg.entity_ids as string[]).map((id) => [id,
+        ['0', '2000', '4000'].map((s, index) => ({ s, lu: Date.now() / 1000 - (3 - index) * 3600 })),
+      ]));
+    }
+    if (msg.type === 'recorder/statistics_during_period') {
+      return Object.fromEntries((msg.statistic_ids as string[]).map((id) => [id, msg.period === 'day'
         ? [{ end: Date.now() - 86400000, change: 8 }, { end: Date.now(), change: 12 }, { end: Date.now() + 86400000, change: 0.7 }]
-        : [{ min: 15, max: 35, mean: 25 }]])));
+        : [{ min: 15, max: 35, mean: 25 }]]));
+    }
+    throw new Error(`Unexpected WebSocket request: ${String(msg.type)}`);
+  });
   return { states, callWS };
 }
 type FakeHass = ReturnType<typeof fakeHass>;
@@ -66,7 +75,125 @@ describe('material-plant-card', () => {
     const full = (overrides: Partial<MaterialPlantCardConfig> = {}) => cfg({ display_type: undefined, ...overrides });
     const rows = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAll<MplMetricRow>('mpl-metric-row')];
     const calls = (hass: FakeHass) => hass.callWS.getCalls().filter((call) => call.args[0].type === 'recorder/statistics_during_period');
+    const daytimeCalls = (hass: FakeHass) => hass.callWS.getCalls().filter((call) => call.args[0].type === 'history/history_during_period');
     const clockForStats = () => sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const illuminanceHass = (value = '0') => {
+      const hass = fakeHass({ ...info, illuminance: { min: 2000, max: 30000, sensor: 'sensor.illuminance', unit_of_measurement: 'lx' } });
+      hass.states['sensor.illuminance'] = state(value);
+      return hass;
+    };
+
+    it('routes default illuminance only to daytime history and excludes current zero from its span', async () => {
+      const hass = illuminanceHass();
+      const card = await mount(full({ show_bars: ['moisture', 'illuminance'] }), hass);
+      await settle(card);
+      expect(calls(hass)).to.have.length(1);
+      expect(calls(hass)[0].args[0].period).to.equal('hour');
+      expect(calls(hass)[0].args[0].statistic_ids).to.deep.equal(['sensor.moisture']);
+      expect(daytimeCalls(hass)).to.have.length(1);
+      expect(daytimeCalls(hass)[0].args[0].entity_ids).to.deep.equal(['sensor.illuminance']);
+      const row = rows(card)[1];
+      expect(row.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
+      expect(row.measurement.value).to.equal(0);
+      expect(row.tone).not.to.equal('problem');
+      expect(row.periodLabel).to.equal('Daytime · 24 h');
+      const button = card.shadowRoot!.querySelectorAll('.tile-btn')[1];
+      expect(button.classList.contains('problem')).to.equal(false);
+      expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.stats, 'daytime, last 24 h'));
+      await row.updateComplete;
+      expect(row.shadowRoot!.textContent).to.include('Daytime · 24 h');
+      card.remove();
+    });
+
+    it('merges positive current illuminance into daytime history and keeps the out-of-bounds tone', async () => {
+      const hass = illuminanceHass();
+      const card = await mount(full({ show_bars: ['illuminance'] }), hass);
+      await settle(card);
+      assign(card, { ...hass, states: { ...hass.states, 'sensor.illuminance': state('1500') } });
+      await settle(card);
+      expect(rows(card)[0].stats).to.deep.equal({ min: 1500, max: 4000, mean: 3000 });
+      expect(rows(card)[0].tone).to.equal('problem');
+      expect(daytimeCalls(hass)).to.have.length(1);
+      card.remove();
+    });
+
+    it('retains plant-reported illuminance problems for current zero', async () => {
+      const hass = illuminanceHass();
+      hass.states[ENTITY] = state('problem', { problems: [{ sensor_type: 'illuminance', status: 'Low' }] });
+      const card = await mount(full({ show_bars: ['illuminance'] }), hass);
+      await settle(card);
+      expect(rows(card)[0].tone).to.equal('problem');
+      expect(query(card, '.tile-btn').classList.contains('problem')).to.equal(true);
+      expect(rows(card)[0].stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
+      card.remove();
+    });
+
+    it('uses the previous hourly range, label and zero error tone when daytime filtering is disabled', async () => {
+      const hass = illuminanceHass();
+      const card = await mount(full({ show_bars: ['illuminance'], illuminance_daytime_only: false }), hass);
+      await settle(card);
+      expect(daytimeCalls(hass)).to.have.length(0);
+      expect(calls(hass)).to.have.length(1);
+      expect(calls(hass)[0].args[0].period).to.equal('hour');
+      expect(calls(hass)[0].args[0].statistic_ids).to.deep.equal(['sensor.illuminance']);
+      const row = rows(card)[0];
+      expect(row.stats).to.deep.equal({ min: 0, max: 35, mean: 25 });
+      expect(row.periodLabel).to.equal('Last 24 h');
+      expect(row.tone).to.equal('problem');
+      expect(query(card, '.tile-btn').getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.stats, 'last 24 h'));
+      card.remove();
+    });
+
+    it('labels seven-day illuminance history as daytime in visible and accessible text', async () => {
+      const clock = clockForStats();
+      const hass = illuminanceHass();
+      const card = await mount(full({ show_bars: ['illuminance'], history_period: '7d' }), hass);
+      await settle(card);
+      expect(calls(hass)).to.have.length(0);
+      expect(daytimeCalls(hass)).to.have.length(1);
+      expect(daytimeCalls(hass)[0].args[0].start_time).to.equal(new Date(Date.now() - 7 * 86400000).toISOString());
+      const row = rows(card)[0];
+      expect(row.periodLabel).to.equal('Daytime · 7 d');
+      expect(query(card, '.tile-btn').getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.stats, 'daytime, last 7 days'));
+      await row.updateComplete;
+      expect(row.shadowRoot!.textContent).to.include('Daytime · 7 d');
+      card.remove();
+      expect(clock.countTimers()).to.equal(0);
+    });
+
+    it('refetches illuminance when toggled between daytime and hourly groups', async () => {
+      const clock = clockForStats();
+      const hass = illuminanceHass();
+      const card = await mount(full({ show_bars: ['illuminance'] }), hass);
+      await settle(card);
+      expect(daytimeCalls(hass)).to.have.length(1);
+      card.setConfig(full({ show_bars: ['illuminance'], illuminance_daytime_only: false }));
+      await settle(card);
+      await clock.tickAsync(60000);
+      await settle(card);
+      expect(calls(hass)).to.have.length(1);
+      expect(rows(card)[0].stats).to.deep.equal({ min: 0, max: 35, mean: 25 });
+      card.setConfig(full({ show_bars: ['illuminance'] }));
+      await settle(card);
+      await clock.tickAsync(60000);
+      await settle(card);
+      expect(daytimeCalls(hass)).to.have.length(2);
+      expect(rows(card)[0].stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
+      card.remove();
+    });
+
+    it('keeps cumulative illuminance in the daily totals group', async () => {
+      const hass = illuminanceHass();
+      hass.states['sensor.illuminance'] = state('0', { state_class: 'total_increasing' });
+      const card = await mount(full({ show_bars: ['illuminance'] }), hass);
+      await settle(card);
+      expect(daytimeCalls(hass)).to.have.length(0);
+      expect(calls(hass)).to.have.length(1);
+      expect(calls(hass)[0].args[0].period).to.equal('day');
+      expect(rows(card)[0].stats).to.deep.equal({ min: 8, max: 12, mean: 10 });
+      expect(rows(card)[0].periodLabel).to.equal('Daily · 7 d');
+      card.remove();
+    });
 
     it('renders ordered grouped 84px tiles at 327px with named sensor actions and no tooltip', async () => {
       const hass = fakeHass();
@@ -83,7 +210,8 @@ describe('material-plant-card', () => {
         expect(row.tone).to.equal('ok');
         expect(row.hideUnits).to.equal(false);
         expect(row.showHistory).to.equal(true);
-        expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.stats));
+        expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.stats,
+          row.measurement.key === 'illuminance' ? 'daytime, last 24 h' : 'last 24 h'));
         expect(button.getBoundingClientRect().height).to.equal(84);
         const style = getComputedStyle(button);
         expect(style.padding).to.equal('8px 12px');
@@ -323,6 +451,7 @@ describe('material-plant-card', () => {
         const card = await mount(config, hass);
         await clock.tickAsync(600000);
         expect(calls(hass)).to.have.length(0);
+        expect(daytimeCalls(hass)).to.have.length(0);
         for (const row of rows(card)) {
           expect(row.stats).to.equal(null);
           expect(row.showHistory).to.equal(false);
