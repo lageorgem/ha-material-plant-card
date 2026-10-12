@@ -67,6 +67,7 @@ describe('mpl-gauge', () => {
     const el = await fixture<MplGauge>(html`<mpl-gauge></mpl-gauge>`);
     expect(customElements.get('mpl-gauge')).to.equal(MplGauge);
     expect(el.fraction).to.equal(null);
+    expect(el.embedded).to.equal(false);
     expect(el.tone).to.equal('unknown');
     expect(el.getAttribute('tone')).to.equal('unknown');
     expect(el.shadowRoot!.querySelector('.active')).to.equal(null);
@@ -74,19 +75,22 @@ describe('mpl-gauge', () => {
     expect(el.shadowRoot!.querySelector('.value')).to.equal(null);
   });
 
-  it('renders three SVG zone paths with four-degree gaps', async () => {
+  it('renders three SVG zone paths with eight-degree gaps and distinct track styles', async () => {
     const el = await mount();
+    el.style.setProperty('--mpl-outline-variant', 'rgb(10, 20, 30)');
+    el.style.setProperty('--mpl-secondary-container', 'rgb(40, 50, 60)');
     const root = el.shadowRoot!;
     expect(root.querySelectorAll('svg path').length).to.equal(3);
     for (const [selector, start, end] of [
-      ['.track-low', 135, 187],
-      ['.track-ok', 191, 349],
-      ['.track-high', 353, 405],
+      ['.track-low', 135, 185],
+      ['.track-ok', 193, 347],
+      ['.track-high', 355, 405],
     ] as const) {
       const track = root.querySelector(selector)!;
       expect(track.namespaceURI).to.equal('http://www.w3.org/2000/svg');
       expect(track.getAttribute('d')).to.equal(arcPath(24, 24, 20, start, end));
-      expect(getComputedStyle(track).strokeWidth).to.equal('4px');
+      expect(getComputedStyle(track).strokeWidth).to.equal(selector === '.track-ok' ? '4px' : '2px');
+      expect(getComputedStyle(track).stroke).to.equal(selector === '.track-ok' ? 'rgb(40, 50, 60)' : 'rgb(10, 20, 30)');
       expect(getComputedStyle(track).strokeLinecap).to.equal('round');
     }
   });
@@ -99,6 +103,8 @@ describe('mpl-gauge', () => {
         const dot = el.shadowRoot!.querySelector('.dot')!;
         expect(el.getAttribute('tone')).to.equal(tone);
         expect(active.namespaceURI).to.equal('http://www.w3.org/2000/svg');
+        expect(getComputedStyle(active).strokeWidth).to.equal('4px');
+        expect(active.previousElementSibling!.classList.contains('track-high')).to.equal(true);
         expect(active.getAttribute('d')).to.equal(arcPath(24, 24, 20, 135, 135 + 270 * fraction));
         const radians = (135 + 270 * fraction) * Math.PI / 180;
         expect(Number(dot.getAttribute('cx'))).to.be.closeTo(24 + 20 * Math.cos(radians), 0.01);
@@ -146,6 +152,31 @@ describe('mpl-gauge', () => {
     const icon = el.shadowRoot!.querySelector('ha-icon')!;
     expect(icon.getAttribute('aria-hidden')).to.equal('true');
     expect(icon.getAttribute('icon')).to.equal('mdi:water');
+  });
+
+  it('removes wrapper semantics when embedded and restores them when standalone', async () => {
+    const el = await mount(0.456, 'ok');
+    el.embedded = true;
+    await el.updateComplete;
+    const wrapper = el.shadowRoot!.querySelector('.gauge')!;
+    expect(wrapper.hasAttribute('role')).to.equal(false);
+    expect(wrapper.getAttributeNames().filter(name => name.startsWith('aria-'))).to.deep.equal([]);
+    el.embedded = false;
+    await el.updateComplete;
+    expect(wrapper.getAttribute('role')).to.equal('meter');
+    expect(wrapper.getAttribute('aria-label')).to.equal(el.label);
+    expect(wrapper.getAttribute('aria-valuetext')).to.equal(el.label);
+    expect(wrapper.getAttribute('aria-valuemin')).to.equal('0');
+    expect(wrapper.getAttribute('aria-valuemax')).to.equal('100');
+    expect(wrapper.getAttribute('aria-valuenow')).to.equal('46');
+  });
+
+  it('accepts the embedded boolean attribute without wrapper role or aria attributes', async () => {
+    const el = await fixture<MplGauge>(html`<mpl-gauge embedded label="Moisture"></mpl-gauge>`);
+    expect(el.embedded).to.equal(true);
+    const wrapper = el.shadowRoot!.querySelector('.gauge')!;
+    expect(wrapper.hasAttribute('role')).to.equal(false);
+    expect(wrapper.getAttributeNames().filter(name => name.startsWith('aria-'))).to.deep.equal([]);
   });
 
   it('renders value text verbatim and removes it when empty', async () => {

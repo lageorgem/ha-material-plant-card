@@ -7,7 +7,7 @@ const CENTER = 24;
 const RADIUS = 20;
 const START = 135;
 const SWEEP = 270;
-const HALF_GAP = 2;
+const HALF_GAP = 4;
 
 function pointAt(cx: number, cy: number, r: number, angle: number) {
   const radians = angle * Math.PI / 180;
@@ -29,6 +29,7 @@ export class MplGauge extends LitElement {
   @property() icon = '';
   @property() value = '';
   @property() label = '';
+  @property({ type: Boolean, attribute: 'embedded' }) embedded = false;
 
   protected render(): TemplateResult {
     const fraction = this.fraction;
@@ -40,12 +41,12 @@ export class MplGauge extends LitElement {
     return html`
       <div
         class="gauge"
-        role="meter"
-        aria-label=${this.label}
-        aria-valuemin="0"
-        aria-valuemax="100"
-        aria-valuenow=${fraction === null ? nothing : Math.round(fraction * 100)}
-        aria-valuetext=${this.label}
+        role=${this.embedded ? nothing : 'meter'}
+        aria-label=${this.embedded ? nothing : this.label}
+        aria-valuemin=${this.embedded ? nothing : '0'}
+        aria-valuemax=${this.embedded ? nothing : '100'}
+        aria-valuenow=${this.embedded || fraction === null ? nothing : Math.round(fraction * 100)}
+        aria-valuetext=${this.embedded ? nothing : this.label}
       >
         <div class="dial">
           <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
@@ -78,6 +79,7 @@ export class MplGauge extends LitElement {
         --mpl-gauge-value-size: 12px;
         --mpl-gauge-value-line: 16px;
         --mpl-gauge-track-width: 4;
+        --mpl-gauge-outer-track-width: 2;
         --mpl-gauge-dot-stroke: 2;
         --mpl-gauge-tone: var(--mpl-primary);
         --mpl-gauge-motion: var(
@@ -123,7 +125,8 @@ export class MplGauge extends LitElement {
       }
       .track-low,
       .track-high {
-        stroke: var(--mpl-surface-container-highest);
+        stroke-width: var(--mpl-gauge-outer-track-width);
+        stroke: var(--mpl-outline-variant);
       }
       .track-ok {
         stroke: var(--mpl-secondary-container);

@@ -188,7 +188,7 @@ export class MaterialPlantCard extends LitElement {
         </div>
         ${measurements.length ? html`<div class="gauges">${measurements.map((m) => html`
           <button class="gauge-btn" type="button" title=${describeMeasurement(m)} aria-label=${describeMeasurement(m)} @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}>
-            <mpl-gauge .fraction=${m.fraction} .tone=${toneFor(m, problems)} .icon=${m.icon}
+            <mpl-gauge .embedded=${true} .fraction=${m.fraction} .tone=${toneFor(m, problems)} .icon=${m.icon}
               .value=${hideUnits ? '' : formatValue(m.value, m.unit, hideUnits)} .label=${describeMeasurement(m)}></mpl-gauge>
           </button>`)}</div>` : nothing}
       </ha-card>`;

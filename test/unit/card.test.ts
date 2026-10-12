@@ -90,6 +90,20 @@ describe('material-plant-card', () => {
     expect(query(card, '.name').textContent).to.equal(ENTITY);
   });
 
+  it('embeds every gauge in a button named by its measurement description', async () => {
+    const card = await mount();
+    const buttons = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')];
+    expect(buttons).to.have.length(DEFAULT_GAUGES.length);
+    for (const button of buttons) {
+      const gauge = button.querySelector('mpl-gauge')!;
+      await gauge.updateComplete;
+      expect(gauge.embedded).to.equal(true);
+      expect(button.getAttribute('aria-label')).to.equal(gauge.label);
+      expect(button.getAttribute('aria-label')).to.equal(button.getAttribute('title'));
+      expect(gauge.shadowRoot!.querySelector('[role="meter"]')).to.equal(null);
+    }
+  });
+
   it('replaces species with problem text and shows badge only for problems', async () => {
     const hass = fakeHass();
     const card = await mount(cfg(), hass);
