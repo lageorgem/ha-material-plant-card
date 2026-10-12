@@ -187,7 +187,11 @@ describe('activeProblems', () => {
     expect(activeProblems(plant, [], { problem_source: 'plant', problem_sensors: ['temperature'] })).to.deep.equal([
       { key: 'temperature', label: 'Temperature', status: 'high' },
     ]);
-    expect(activeProblems(plant, [], { problem_sensors: [] })).to.deep.equal([]);
+    expect(activeProblems(plant, [], { problem_source: 'plant', problem_sensors: [] })).to.deep.equal([
+      { key: 'moisture', label: 'Moisture', status: 'low' },
+      { key: 'temperature', label: 'Temperature', status: 'high' },
+      { key: 'custom_key', label: 'Custom key', status: 'problem' },
+    ]);
     expect(activeProblems({ state: 'ok', attributes: { problems: [{ sensor_type: 'vpd' }] } }, [], {})).to.deep.equal([
       { key: 'vpd', label: 'VPD', status: 'problem' },
     ]);
@@ -204,7 +208,10 @@ describe('activeProblems', () => {
     expect(activeProblems(undefined, measurements, { problem_source: 'gauges', problem_sensors: ['temperature'] })).to.deep.equal([
       { key: 'temperature', label: 'Temperature', status: 'high' },
     ]);
-    expect(activeProblems(plant, measurements, { problem_source: 'gauges', problem_sensors: [] })).to.deep.equal([]);
+    expect(activeProblems(plant, measurements, { problem_source: 'gauges', problem_sensors: [] })).to.deep.equal([
+      { key: 'moisture', label: 'Moisture', status: 'low' },
+      { key: 'temperature', label: 'Temperature', status: 'high' },
+    ]);
   });
 
   it('falls back only for a problem plant without an array attribute', () => {

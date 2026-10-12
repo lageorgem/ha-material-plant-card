@@ -101,7 +101,8 @@ export function activeProblems(
   measurements: readonly Measurement[],
   config: Pick<MaterialPlantCardConfig, 'problem_source' | 'problem_sensors'>,
 ): Problem[] {
-  const allowed = Array.isArray(config.problem_sensors) ? new Set(config.problem_sensors) : undefined;
+  const allowed = Array.isArray(config.problem_sensors) && config.problem_sensors.length > 0
+    ? new Set(config.problem_sensors) : undefined;
   const problems: Problem[] = [];
   const seen = new Set<string>();
   if (config.problem_source === 'gauges') {
