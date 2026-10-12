@@ -3,15 +3,14 @@ import { property } from 'lit/decorators.js';
 import type { GaugeTone } from '../types';
 import { themeTokens } from '../theme';
 
-const CENTER = 24;
+const CX = 24;
+const CY = 24;
 const RADIUS = 20;
 const STROKE = 4;
 const START = 135;
 const SWEEP = 270;
-const ARC_TOP = CENTER - RADIUS - STROKE / 2;
-const ARC_BOTTOM = CENTER + RADIUS * Math.sin((START + SWEEP) * Math.PI / 180) + STROKE / 2;
-/** Vertical centre of the visible arc bounds, in the 48-unit viewBox. */
-export const OPTICAL_CENTER_Y = (ARC_TOP + ARC_BOTTOM) / 2;
+/** Vertical centre of the circle, in the 48-unit viewBox. */
+export const ICON_CENTER_Y = CY;
 const HALF_GAP = 4;
 const ZONES = [
   { name: 'low', start: START, end: START + SWEEP * 0.2 - HALF_GAP },
@@ -45,7 +44,7 @@ export class MplGauge extends LitElement {
     const fraction = this.fraction;
     const showIndicator = fraction !== null && this.tone !== 'unknown';
     const end = START + SWEEP * (fraction ?? 0);
-    const dot = pointAt(CENTER, CENTER, RADIUS, end);
+    const dot = pointAt(CX, CY, RADIUS, end);
 
     return html`
       <div
@@ -61,11 +60,11 @@ export class MplGauge extends LitElement {
           <svg viewBox="0 0 48 48" aria-hidden="true" focusable="false">
             ${svg`
               ${ZONES.map(zone => svg`
-                <path class=${`track-${zone.name}`} d=${arcPath(CENTER, CENTER, RADIUS, zone.start, zone.end)}></path>
+                <path class=${`track-${zone.name}`} d=${arcPath(CX, CY, RADIUS, zone.start, zone.end)}></path>
               `)}
               ${showIndicator ? ZONES.map(zone => {
                 if (end <= zone.start) return nothing;
-                const activePath = arcPath(CENTER, CENTER, RADIUS, zone.start, Math.min(zone.end, end));
+                const activePath = arcPath(CX, CY, RADIUS, zone.start, Math.min(zone.end, end));
                 return svg`
                   <path class=${`active active-${zone.name}`} d=${activePath} style=${`d: path('${activePath}')`}></path>
                 `;
@@ -164,7 +163,7 @@ export class MplGauge extends LitElement {
       ha-icon {
         --mdc-icon-size: var(--mpl-gauge-icon-size);
         position: absolute;
-        top: ${OPTICAL_CENTER_Y / 48 * 100}%;
+        top: ${ICON_CENTER_Y / 48 * 100}%;
         left: 50%;
         transform: translate(-50%, -50%);
         display: flex;

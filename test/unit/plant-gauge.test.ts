@@ -1,6 +1,6 @@
 import { fixture, html, expect } from '@open-wc/testing';
 import { emulateMedia } from '@web/test-runner-commands';
-import { arcPath, MplGauge, OPTICAL_CENTER_Y } from '../../src/gauge/plant-gauge';
+import { arcPath, MplGauge, ICON_CENTER_Y } from '../../src/gauge/plant-gauge';
 import type { GaugeTone } from '../../src/types';
 
 async function mount(fraction: number | null = null, tone: GaugeTone = 'unknown') {
@@ -35,12 +35,12 @@ describe('arcPath', () => {
 });
 
 describe('mpl-gauge', () => {
-  it('derives the optical centre from the arc bounds', () => {
-    expect(OPTICAL_CENTER_Y).to.be.closeTo(21.07, 0.01);
+  it('places the icon centre at the circle centre in the viewBox', () => {
+    expect(ICON_CENTER_Y).to.equal(24);
   });
 
   for (const size of [44, 64]) {
-    it(`centres the icon on the track bounds in a ${size}px dial`, async () => {
+    it(`centres the icon on the circle centre in a ${size}px dial`, async () => {
       const el = await mount();
       el.style.setProperty('--mpl-gauge-size', `${size}px`);
       const root = el.shadowRoot!;
@@ -48,12 +48,7 @@ describe('mpl-gauge', () => {
       const icon = root.querySelector('ha-icon')!;
       const box = icon.getBoundingClientRect();
       const centreY = box.top + box.height / 2;
-      const tracks = [...root.querySelectorAll('path')].map(path => path.getBoundingClientRect());
-      const trackCentreY = (Math.min(...tracks.map(track => track.top))
-        + Math.max(...tracks.map(track => track.bottom))) / 2;
-
-      expect(centreY).to.be.closeTo(dial.top + dial.height * OPTICAL_CENTER_Y / 48, 0.5);
-      expect(centreY).to.be.closeTo(trackCentreY, 0.75);
+      expect(centreY).to.be.closeTo(dial.top + dial.height / 2, 0.5);
       expect(box.left + box.width / 2).to.be.closeTo(dial.left + dial.width / 2, 0.5);
       expect(box.width).to.equal(18);
       expect(box.height).to.equal(18);
