@@ -76,7 +76,8 @@ describe('material-plant-card', () => {
     const rows = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAll<MplMetricRow>('mpl-metric-row')];
     const calls = (hass: FakeHass) => hass.callWS.getCalls().filter((call) => call.args[0].type === 'recorder/statistics_during_period');
     const daytimeCalls = (hass: FakeHass) => hass.callWS.getCalls().filter((call) => call.args[0].type === 'history/history_during_period');
-    const clockForStats = () => sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    // Keep history fixture timestamps and the request's clipping boundary identical.
+    const clockForStats = () => sinon.useFakeTimers({ now: Date.UTC(2026, 0, 15, 12), toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const illuminanceHass = (value = '0') => {
       const hass = fakeHass({ ...info, illuminance: { min: 2000, max: 30000, sensor: 'sensor.illuminance', unit_of_measurement: 'lx' } });
       hass.states['sensor.illuminance'] = state(value);
@@ -84,6 +85,7 @@ describe('material-plant-card', () => {
     };
 
     it('routes default illuminance only to daytime history and excludes current zero from its span', async () => {
+      clockForStats();
       const hass = illuminanceHass();
       const card = await mount(full({ show_bars: ['moisture', 'illuminance'] }), hass);
       await settle(card);
@@ -106,6 +108,7 @@ describe('material-plant-card', () => {
     });
 
     it('merges positive current illuminance into daytime history and keeps the out-of-bounds tone', async () => {
+      clockForStats();
       const hass = illuminanceHass();
       const card = await mount(full({ show_bars: ['illuminance'] }), hass);
       await settle(card);
@@ -118,6 +121,7 @@ describe('material-plant-card', () => {
     });
 
     it('retains plant-reported illuminance problems for current zero', async () => {
+      clockForStats();
       const hass = illuminanceHass();
       hass.states[ENTITY] = state('problem', { problems: [{ sensor_type: 'illuminance', status: 'Low' }] });
       const card = await mount(full({ show_bars: ['illuminance'] }), hass);
@@ -183,6 +187,7 @@ describe('material-plant-card', () => {
     });
 
     it('keeps cumulative illuminance in the daily totals group', async () => {
+      clockForStats();
       const hass = illuminanceHass();
       hass.states['sensor.illuminance'] = state('0', { state_class: 'total_increasing' });
       const card = await mount(full({ show_bars: ['illuminance'] }), hass);
@@ -196,6 +201,7 @@ describe('material-plant-card', () => {
     });
 
     it('renders ordered grouped 84px tiles at 327px with named sensor actions and no tooltip', async () => {
+      clockForStats();
       const hass = fakeHass();
       const card = await mount(full(), hass);
       card.style.width = '327px';
@@ -239,6 +245,7 @@ describe('material-plant-card', () => {
     });
 
     it('tints only real problem tiles without a left accent while keeping out-of-bounds values red', async () => {
+      clockForStats();
       const hass = fakeHass();
       hass.states[ENTITY] = state('problem', { problems: [{ sensor_type: 'moisture', status: 'Low' }] });
       hass.states['sensor.moisture'] = state('5');
@@ -279,6 +286,7 @@ describe('material-plant-card', () => {
 
     for (const stateClass of ['total', 'total_increasing']) {
       it(`uses complete daily totals and advisory current tone for ${stateClass} sensors`, async () => {
+        clockForStats();
         const hass = fakeHass();
         hass.states['sensor.dli'] = state('0.7', { state_class: stateClass });
         const card = await mount(full({ show_bars: ['moisture', 'dli'] }), hass);
