@@ -406,6 +406,56 @@ describe('material-plant-card', () => {
     expect(updated.callCount).to.equal(3);
   });
 
+  it('uses a gentle nine-lobe photo mask with approximately 12% radial depth', async () => {
+    const card = await mount();
+    const mask = getComputedStyle(query(card, '.photo')).maskImage;
+    const svg = decodeURIComponent(mask.slice(mask.indexOf(',') + 1).replace(/"\)$/, ''));
+    const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    expect(document.documentElement.getAttribute('viewBox')).to.equal('0 0 100 100');
+    const path = document.querySelector('path')!.getAttribute('d')!;
+    const points = [...path.matchAll(/([\d.]+),([\d.]+)/g)];
+    expect(points).to.have.length(180);
+    const radii = points.map(([, x, y]) => Math.hypot(Number(x) - 50, Number(y) - 50));
+    const max = Math.max(...radii);
+    expect(max).to.be.closeTo(50, 0.001);
+    expect(Math.min(...radii) / max).to.be.closeTo(0.88, 0.0001);
+    expect(radii.filter((radius, index) => radius > radii[(index + 179) % 180] && radius > radii[(index + 1) % 180])).to.have.length(9);
+  });
+
+  for (const [count, columns] of [[7, 4], [8, 4], [9, 5], [10, 5]]) {
+    it(`balances ${count} gauges into ${columns}+${count - columns} rows at 327px`, async () => {
+      const container = await fixture<HTMLDivElement>(html`<div style="width:327px"><material-plant-card></material-plant-card></div>`);
+      const card = container.firstElementChild as MaterialPlantCard;
+      const keys = Array.from({ length: count }, (_, index) => `measurement_${index}`);
+      const data: PlantInfo = Object.fromEntries(keys.map((key) => [key, { min: 10, max: 50, current: 25 }]));
+      card.setConfig(cfg({ show_bars: ['missing', ...keys] }));
+      assign(card, fakeHass(data));
+      await settle(card);
+      for (const gauge of gauges(card)) await gauge.updateComplete;
+      const buttons = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')];
+      expect(buttons).to.have.length(count);
+      const tops = buttons.map((button) => button.offsetTop);
+      const rows = [...new Set(tops)];
+      expect(rows).to.have.length(2);
+      expect(tops.filter((top) => top === rows[0])).to.have.length(columns);
+      expect(tops.filter((top) => top === rows[1])).to.have.length(count - columns);
+      expect(query(card, '.gauges').style.getPropertyValue('--mpl-cols')).to.equal(String(columns));
+    });
+  }
+
+  it('keeps all six gauges within a 240px container', async () => {
+    const container = await fixture<HTMLDivElement>(html`<div style="width:240px"><material-plant-card></material-plant-card></div>`);
+    const card = container.firstElementChild as MaterialPlantCard;
+    card.setConfig(cfg());
+    assign(card, fakeHass());
+    await settle(card);
+    expect(gauges(card)).to.have.length(6);
+    for (const gauge of gauges(card)) {
+      await gauge.updateComplete;
+      expect(gauge.getBoundingClientRect().right).to.be.at.most(container.getBoundingClientRect().right);
+    }
+  });
+
   it('fits six real gauges in one row at 327px and is at most 170px tall', async () => {
     const container = await fixture<HTMLDivElement>(html`<div style="width:327px"><material-plant-card></material-plant-card></div>`);
     const card = container.firstElementChild as MaterialPlantCard;
@@ -419,7 +469,7 @@ describe('material-plant-card', () => {
     expect(gauges(card)).to.have.length(6);
     expect(surface.offsetHeight).to.be.greaterThan(100);
     expect(surface.offsetHeight).to.be.at.most(170);
-    const tops = gauges(card).map((gauge) => gauge.getBoundingClientRect().top);
-    expect(Math.max(...tops) - Math.min(...tops)).to.be.lessThan(1);
+    const tops = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')].map((button) => button.offsetTop);
+    expect(new Set(tops).size).to.equal(1);
   });
 });

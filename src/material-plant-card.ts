@@ -13,7 +13,7 @@ const REFRESH_INTERVAL = 5000;
 const cookieMask = (() => {
   const points = Array.from({ length: 180 }, (_, index) => {
     const angle = index * 2 * Math.PI / 180;
-    const radius = 50 * (0.88 + 0.12 * Math.cos(9 * angle));
+    const radius = 50 * (0.94 + 0.06 * Math.cos(9 * angle));
     return `${(50 + radius * Math.cos(angle)).toFixed(3)},${(50 + radius * Math.sin(angle)).toFixed(3)}`;
   });
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M${points.join(' L')} Z" fill="white"/></svg>`;
@@ -152,6 +152,8 @@ export class MaterialPlantCard extends LitElement {
     const compact = cfg.display_type === 'compact';
     const hideUnits = cfg.hide_units ?? compact;
     const measurements = buildMeasurements(this._info, cfg.show_bars ?? DEFAULT_GAUGES, this.hass.states);
+    const n = measurements.length;
+    const columns = n <= 6 ? n : Math.ceil(n / Math.ceil(n / 6));
     const problems = activeProblems(plant, measurements, cfg);
     const name = cfg.name || plant.attributes.friendly_name || cfg.entity;
     const subtitle = problems.length
@@ -186,7 +188,7 @@ export class MaterialPlantCard extends LitElement {
               <ha-icon icon=${battery.icon} aria-hidden="true"></ha-icon><span>${battery.level === null ? '—' : `${battery.level}%`}</span>
             </button>` : nothing}
         </div>
-        ${measurements.length ? html`<div class="gauges">${measurements.map((m) => html`
+        ${measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
           <button class="gauge-btn" type="button" title=${describeMeasurement(m)} aria-label=${describeMeasurement(m)} @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}>
             <mpl-gauge .embedded=${true} .fraction=${m.fraction} .tone=${toneFor(m, problems)} .icon=${m.icon}
               .value=${hideUnits ? '' : formatValue(m.value, m.unit, hideUnits)} .label=${describeMeasurement(m)}></mpl-gauge>
@@ -218,7 +220,7 @@ export class MaterialPlantCard extends LitElement {
     .battery[data-tone='warn'] { color: var(--mpl-tertiary); }
     .battery[data-tone='low'] { color: var(--mpl-error); }
     .battery[data-tone='unknown'] { color: var(--mpl-outline); }
-    .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: 4px; margin-top: 12px; }
+    .gauges { display: grid; grid-template-columns: repeat(auto-fit, minmax(max(44px, calc(100% / var(--mpl-cols, 6) - 4px)), 1fr)); gap: 4px; margin-top: 12px; }
     .gauge-btn { display: grid; justify-items: center; min-width: 0; min-height: 44px; border-radius: 12px; }
     .gauge-btn:hover, .text-btn:hover { background: color-mix(in srgb, var(--mpl-on-surface) 8%, transparent); }
     .gauge-btn:active, .text-btn:active { background: color-mix(in srgb, var(--mpl-on-surface) 12%, transparent); }
