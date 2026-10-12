@@ -22,7 +22,7 @@ describe('configForm', () => {
     expect(fields().map((item) => item.name).sort()).to.deep.equal([
       'entity', 'name', 'display_type', 'show_bars', 'hide_species', 'hide_image',
       'hide_units', 'hide_history', 'image', 'battery_sensor', 'battery_warn_level',
-      'problem_source', 'problem_sensors', 'history_period',
+      'problem_source', 'problem_sensors', 'history_period', 'illuminance_daytime_only',
     ].sort());
   });
 
@@ -57,6 +57,8 @@ describe('configForm', () => {
       .to.equal(field('hide_history'));
     expect(sections[0].schema?.find((item) => item.name === 'history_period'))
       .to.equal(field('history_period'));
+    expect(sections[0].schema?.find((item) => item.name === 'illuminance_daytime_only'))
+      .to.equal(field('illuminance_daytime_only'));
     expect(field('battery_warn_level').selector).to.deep.equal({
       number: { min: 0, max: 100, step: 1, mode: 'box', unit_of_measurement: '%' },
     });
@@ -67,7 +69,7 @@ describe('configForm', () => {
     for (const name of ['name', 'image']) {
       expect(field(name).selector).to.deep.equal({ text: {} });
     }
-    for (const name of ['hide_units', 'hide_history', 'hide_species', 'hide_image']) {
+    for (const name of ['hide_units', 'hide_history', 'hide_species', 'hide_image', 'illuminance_daytime_only']) {
       expect(field(name).selector).to.deep.equal({ boolean: {} });
     }
     expect(field('display_type').selector).to.deep.equal({ select: {
@@ -98,6 +100,8 @@ describe('configForm', () => {
     expect(configForm.computeLabel(field('show_bars'))).to.equal('Gauges');
     expect(configForm.computeLabel(field('hide_history'))).to.equal('Hide history');
     expect(configForm.computeLabel(field('history_period'))).to.equal('History window');
+    expect(configForm.computeLabel(field('illuminance_daytime_only')))
+      .to.equal('Ignore darkness in illuminance history');
     expect(configForm.computeLabel(field('problem_sensors'))).to.equal('Problem sensors');
     expect(configForm.computeLabel(field('battery_warn_level'))).to.equal('Battery low below');
   });
@@ -114,6 +118,9 @@ describe('configForm', () => {
     );
     expect(configForm.computeHelper(field('history_period'))).to.equal(
       'Full mode. DLI is a daily total, so it always shows daily totals for the last 7 days.',
+    );
+    expect(configForm.computeHelper(field('illuminance_daytime_only'))).to.equal(
+      'Full mode: excludes 0 lx (night) readings from the illuminance range, average and Min/Avg/Max. On by default.',
     );
     expect(configForm.computeHelper(field('battery_warn_level'))).to.equal(
       'Battery turns red below this level (default 10%).',

@@ -29,6 +29,34 @@ export function aggregateStatistics(rows: readonly StatRow[] | undefined): Stats
   return count ? { min, max, mean: total / count } : null;
 }
 
+export function aggregateDaytime(
+  points: readonly { s?: unknown; lu?: number }[] | undefined,
+  start: number,
+  now: number,
+): Stats24h | null {
+  const sorted = (points ?? [])
+    .filter((point) => typeof point.lu === 'number' && Number.isFinite(point.lu))
+    .slice().sort((a, b) => a.lu! - b.lu!);
+  let min = Infinity;
+  let max = -Infinity;
+  let total = 0;
+  let duration = 0;
+  for (let index = 0; index < sorted.length; index++) {
+    const point = sorted[index];
+    const value = typeof point.s === 'number' ? point.s
+      : typeof point.s === 'string' && point.s.trim() !== '' ? Number(point.s) : NaN;
+    const from = Math.max(point.lu! * 1000, start);
+    const to = Math.min(index + 1 < sorted.length ? sorted[index + 1].lu! * 1000 : now, now);
+    const length = to - from;
+    if (!Number.isFinite(value) || value <= 0 || length <= 0) continue;
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+    total += value * length;
+    duration += length;
+  }
+  return duration > 0 ? { min, max, mean: total / duration } : null;
+}
+
 export function withCurrent(stats: Stats24h | null, value: number | null): Stats24h | null {
   if (stats === null || value === null) return stats;
   return { min: Math.min(stats.min, value), max: Math.max(stats.max, value), mean: stats.mean };
@@ -61,12 +89,14 @@ export function aggregateDailyTotals(rows: readonly DailyRow[] | undefined, now:
 export interface HistoryRequest {
   range: readonly string[];
   dailyTotals: readonly string[];
+  daytime: readonly string[];
   window: HistoryWindow;
 }
 
 export interface HistoryResult {
   range: Record<string, Stats24h>;
   dailyTotals: Record<string, Stats24h>;
+  daytime: Record<string, Stats24h>;
   failed: boolean;
 }
 
@@ -75,7 +105,7 @@ export async function fetchHistoryStats(
   req: HistoryRequest,
   now: number = Date.now(),
 ): Promise<HistoryResult> {
-  const result: HistoryResult = { range: {}, dailyTotals: {}, failed: false };
+  const result: HistoryResult = { range: {}, dailyTotals: {}, daytime: {}, failed: false };
   await Promise.all([
     (async () => {
       const ids = [...new Set(req.range)];
@@ -118,6 +148,30 @@ export async function fetchHistoryStats(
           if (stats !== null) dailyTotals[id] = stats;
         }
         result.dailyTotals = dailyTotals;
+      } catch {
+        result.failed = true;
+      }
+    })(),
+    (async () => {
+      const ids = [...new Set(req.daytime)];
+      if (ids.length === 0) return;
+      try {
+        const start = now - (req.window === '7d' ? 7 * 86400000 : 86400000);
+        const response = await hass.callWS<Record<string, { s?: unknown; lu?: number }[]>>({
+          type: 'history/history_during_period',
+          start_time: new Date(start).toISOString(),
+          end_time: new Date(now).toISOString(),
+          entity_ids: ids,
+          minimal_response: true,
+          no_attributes: true,
+          significant_changes_only: false,
+        });
+        const daytime: Record<string, Stats24h> = {};
+        for (const id of ids) {
+          const stats = aggregateDaytime(response[id], start, now);
+          if (stats !== null) daytime[id] = stats;
+        }
+        result.daytime = daytime;
       } catch {
         result.failed = true;
       }

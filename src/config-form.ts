@@ -55,6 +55,7 @@ const labels: Readonly<Record<string, string>> = {
   hide_units: 'Hide units',
   hide_history: 'Hide history',
   history_period: 'History window',
+  illuminance_daytime_only: 'Ignore darkness in illuminance history',
   problem_source: 'Problem source',
   problem_sensors: 'Problem sensors',
   hide_species: 'Hide species',
@@ -67,6 +68,7 @@ const helpers: Readonly<Record<string, string>> = {
   hide_units: 'Hides units next to values.',
   hide_history: 'Full mode only: hides the history range, average and Min/Avg/Max.',
   history_period: 'Full mode. DLI is a daily total, so it always shows daily totals for the last 7 days.',
+  illuminance_daytime_only: 'Full mode: excludes 0 lx (night) readings from the illuminance range, average and Min/Avg/Max. On by default.',
   show_bars: `Default: ${DEFAULT_GAUGES.map((key) => MEASUREMENT_LABELS[key]).join(', ')}.`,
   problem_source: "Plant monitor follows the integration's problem triggers; Gauges flags any out-of-range value.",
   problem_sensors: 'Leave empty to allow every sensor.',
@@ -93,6 +95,7 @@ const schema: HaFormSchema[] = [
       } } },
       { name: 'hide_units', selector: { boolean: {} } },
       { name: 'hide_history', selector: { boolean: {} } },
+      { name: 'illuminance_daytime_only', selector: { boolean: {} } },
       { name: 'history_period', selector: { select: {
         mode: 'dropdown',
         options: [

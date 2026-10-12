@@ -34,6 +34,8 @@ export interface MaterialPlantCardConfig {
   hide_history?: boolean;
   // Full-mode range window; defaults to '24h'. Cumulative metrics always use daily totals.
   history_period?: '24h' | '7d';
+  // Full mode: illuminance history ignores 0 lx (night) readings. Defaults to true.
+  illuminance_daytime_only?: boolean;
   image?: string;
   battery_sensor?: string;
   // Battery turns red below this level; defaults to 10.
