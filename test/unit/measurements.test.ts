@@ -143,12 +143,22 @@ describe('measurement presentation', () => {
   });
 
   it('describes raw numbers, missing values/ranges, and empty units', () => {
-    expect(describeMeasurement(measurement())).to.equal('Moisture: 13 % (15–65 %)');
-    expect(describeMeasurement(measurement({ value: null }))).to.equal('Moisture: — % (15–65 %)');
-    expect(describeMeasurement(measurement({ min: null }))).to.equal('Moisture: 13 %');
-    expect(describeMeasurement(measurement({ max: null, unit: '' }))).to.equal('Moisture: 13');
-    expect(describeMeasurement(measurement({ unit: '' }))).to.equal('Moisture: 13 (15–65)');
-    expect(describeMeasurement(measurement({ value: 57.16 }))).to.equal('Moisture: 57.16 % (15–65 %)');
+    expect(describeMeasurement(measurement({ status: 'ok' }))).to.equal('Moisture: 13 % (15–65 %)');
+    expect(describeMeasurement(measurement({ value: null, status: 'unknown' }))).to.equal('Moisture: — % (15–65 %)');
+    expect(describeMeasurement(measurement({ min: null, status: 'unknown' }))).to.equal('Moisture: 13 %');
+    expect(describeMeasurement(measurement({ max: null, unit: '', status: 'unknown' }))).to.equal('Moisture: 13');
+    expect(describeMeasurement(measurement({ unit: '', status: 'ok' }))).to.equal('Moisture: 13 (15–65)');
+    expect(describeMeasurement(measurement({ value: 57.16, status: 'ok' }))).to.equal('Moisture: 57.16 % (15–65 %)');
+  });
+
+  it('appends low and high status in words, leaving ok and unknown unchanged', () => {
+    for (const [status, value, suffix] of [
+      ['low', 6, ' · low'], ['high', 70, ' · high'],
+      ['ok', 30, ''], ['unknown', 30, ''],
+    ] as const) {
+      expect(describeMeasurement(measurement({ status, value, max: 60 })))
+        .to.equal(`Moisture: ${value} % (15–60 %)${suffix}`);
+    }
   });
 
   it('selects tone for all statuses with and without a matching problem', () => {

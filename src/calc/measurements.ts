@@ -86,7 +86,8 @@ export function describeMeasurement(m: Measurement): string {
   const unit = m.unit ? ` ${m.unit}` : '';
   const value = m.value === null ? '—' : String(m.value);
   const range = m.min === null || m.max === null ? '' : ` (${String(m.min)}–${String(m.max)}${unit})`;
-  return `${m.label}: ${value}${unit}${range}`.replace(/ {2,}/g, ' ');
+  const status = m.status === 'low' || m.status === 'high' ? ` · ${m.status}` : '';
+  return `${m.label}: ${value}${unit}${range}${status}`.replace(/ {2,}/g, ' ');
 }
 
 export function toneFor(m: Measurement, problems: readonly Problem[]): GaugeTone {
