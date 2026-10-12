@@ -8,8 +8,12 @@ import { configForm } from './config-form';
 import { themeTokens } from './theme';
 import './gauge/plant-gauge';
 import './battery/battery-glyph';
+import { fetch24hStats, withCurrent, type Stats24h } from './data/history-stats';
+import { describeWithStats } from './full/metric-row';
 
 const REFRESH_INTERVAL = 5000;
+const STATS_INTERVAL = 10 * 60 * 1000;
+const STATS_THROTTLE = 60 * 1000;
 // One immutable, clean-room nine-lobe mask, shared by images and placeholders.
 const cookieMask = (() => {
   const points = Array.from({ length: 180 }, (_, index) => {
@@ -39,6 +43,13 @@ export class MaterialPlantCard extends LitElement {
   @state() private _info?: PlantInfo;
   @state() private _failedSrc?: string;
   @state() private _gaugeCapacity = 6;
+  @state() private _statsMap: Record<string, Stats24h> = {};
+  private _statsKey?: string;
+  private _statsRequest = 0;
+  private _statsLastFetch = -Infinity;
+  private _statsPending = true;
+  private _statsInFlight?: number;
+  private _statsTimer?: ReturnType<typeof setTimeout>;
   private _gaugesObserver?: ResizeObserver;
   private _gaugesFrame?: number;
   private _imageSrc?: string;
@@ -208,6 +219,76 @@ export class MaterialPlantCard extends LitElement {
 
   protected updated(): void {
     this._positionTooltip();
+    this._syncStats();
+  }
+
+  private _statsSensors(): string[] {
+    if (!this.hass || !this._config || !this.hass.states[this._config.entity]) return [];
+    return [...new Set(buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states)
+      .flatMap((m) => m.sensor ? [m.sensor] : []))];
+  }
+
+  private _stopStats(dropMap = false): void {
+    clearTimeout(this._statsTimer);
+    this._statsTimer = undefined;
+    this._statsRequest++;
+    this._statsPending ||= this._statsInFlight !== undefined;
+    this._statsInFlight = undefined;
+    if (dropMap) {
+      this._statsKey = undefined;
+      this._statsPending = true;
+      if (Object.keys(this._statsMap).length) this._statsMap = {};
+    }
+  }
+
+  private _syncStats(): void {
+    if (this._config?.display_type === 'compact' || this._config?.hide_history) {
+      this._stopStats(true);
+      return;
+    }
+    if (!this.isConnected || !this.hass || !this._info || !this._config) return;
+    const sensors = this._statsSensors();
+    const key = JSON.stringify([this._config.entity, [...sensors].sort()]);
+    if (key !== this._statsKey) {
+      this._statsKey = key;
+      this._statsRequest++;
+      this._statsPending = true;
+    }
+    if (!sensors.length) {
+      clearTimeout(this._statsTimer);
+      this._statsTimer = undefined;
+      return;
+    }
+    const elapsed = Date.now() - this._statsLastFetch;
+    const wait = this._statsPending ? Math.max(0, STATS_THROTTLE - elapsed) : Math.max(0, STATS_INTERVAL - elapsed);
+    clearTimeout(this._statsTimer);
+    this._statsTimer = undefined;
+    if (wait === 0) void this._fetchStats(sensors);
+    else this._statsTimer = setTimeout(() => {
+      this._statsTimer = undefined;
+      this._statsPending = true;
+      this._syncStats();
+    }, wait);
+  }
+
+  private async _fetchStats(sensors: string[]): Promise<void> {
+    const hass = this.hass!;
+    const request = ++this._statsRequest;
+    this._statsInFlight = request;
+    this._statsPending = false;
+    this._statsLastFetch = Date.now();
+    this._syncStats();
+    // The data helper returns {} on errors; distinguish failures from valid empty history.
+    let failed = false;
+    const result = await fetch24hStats({ callWS: async <T>(message: Record<string, unknown>): Promise<T> => {
+      try { return await hass.callWS<T>(message); }
+      catch (error) { failed = true; throw error; }
+    } }, sensors, this._statsLastFetch);
+    if (request === this._statsRequest && this.isConnected) {
+      if (!failed) this._statsMap = result;
+    }
+    if (this._statsInFlight === request) this._statsInFlight = undefined;
+    this._syncStats();
   }
 
   private _positionTooltip(): void {
@@ -235,15 +316,23 @@ export class MaterialPlantCard extends LitElement {
     const changedEntity = this._config?.entity !== config.entity;
     this._config = { ...config, show_bars: config.show_bars ? [...config.show_bars] : undefined };
     this._dismissTooltip();
+    this._statsRequest++;
+    this._statsPending = true;
+    if (changedEntity || config.display_type === 'compact' || config.hide_history) this._stopStats(true);
     if (changedEntity) {
       this._info = undefined;
       // Invalidate the old entity even when hass has not arrived yet.
       this._request++;
       this._queueFetch();
     }
+    this._syncStats();
   }
 
-  public getCardSize(): number { return this._config?.display_type === 'compact' ? 3 : 4; }
+  public getCardSize(): number {
+    return this._config?.display_type === 'compact' ? 4 : 2 +
+      (this.hass && this._config && this.hass.states[this._config.entity]
+        ? buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states).length : 0);
+  }
   public getGridOptions(): { columns: number; min_columns: number; rows: 'auto' } {
     return { columns: 6, min_columns: 4, rows: 'auto' };
   }
@@ -297,6 +386,7 @@ export class MaterialPlantCard extends LitElement {
   public connectedCallback(): void {
     super.connectedCallback();
     if (this._pending) this._queueFetch();
+    this._syncStats();
     this._observeGauges();
     window.addEventListener('pointermove', this._gaugePointerMove, true);
     window.addEventListener('pointerup', this._gaugePointerUp, true);
@@ -307,6 +397,7 @@ export class MaterialPlantCard extends LitElement {
   }
   public disconnectedCallback(): void {
     super.disconnectedCallback();
+    this._stopStats();
     this._dismissTooltip();
     window.removeEventListener('pointermove', this._gaugePointerMove, true);
     window.removeEventListener('pointerup', this._gaugePointerUp, true);
@@ -348,7 +439,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   protected shouldUpdate(changed: PropertyValues): boolean {
-    if (changed.has('_tooltip') || changed.has('_tooltipSource') || changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugeCapacity')) return true;
+    if (changed.has('_statsMap') || changed.has('_tooltip') || changed.has('_tooltipSource') || changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugeCapacity')) return true;
     if (!this._config || !this.hass || !changed.has('hass')) return false;
     const old = changed.get('hass') as HomeAssistant | undefined;
     if (!old) return true;
@@ -374,7 +465,7 @@ export class MaterialPlantCard extends LitElement {
     const plant = this.hass.states[cfg.entity];
     if (!plant) return html`<ha-card><div class="warning">Entity not available: ${cfg.entity}</div></ha-card>`;
     const compact = cfg.display_type === 'compact';
-    const hideUnits = cfg.hide_units ?? compact;
+    const hideUnits = cfg.hide_units ?? false;
     const measurements = buildMeasurements(this._info, cfg.show_bars ?? DEFAULT_GAUGES, this.hass.states);
     const tooltipIndex = this._tooltip ? Array.from(this.shadowRoot!.querySelectorAll('.gauge-btn')).indexOf(this._tooltip) : -1;
     const tooltipMeasurement = measurements[tooltipIndex];
@@ -386,7 +477,7 @@ export class MaterialPlantCard extends LitElement {
     const name = cfg.name || plant.attributes.friendly_name || cfg.entity;
     const subtitle = problems.length
       ? problems.map((problem) => problem.status === 'problem' ? problem.label : `${problem.label} ${problem.status}`).join(' · ')
-      : !compact && !cfg.hide_species ? plant.attributes.species : undefined;
+      : !cfg.hide_species ? plant.attributes.species : undefined;
     const source: unknown = cfg.image ?? plant.attributes.entity_picture;
     const src = typeof source === 'string' && source ? source : undefined;
     if (src !== this._imageSrc) {
@@ -421,7 +512,14 @@ export class MaterialPlantCard extends LitElement {
               <mpl-battery .level=${battery.level} .tone=${battery.tone}></mpl-battery>
             </button>` : nothing}
         </div>
-        ${measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
+        ${!compact && measurements.length ? html`<div class="tiles">${measurements.map((m) => {
+          const stats = cfg.hide_history ? null : withCurrent(m.sensor ? this._statsMap[m.sensor] ?? null : null, m.value);
+          return html`<button class="tile-btn" type="button" aria-label=${describeWithStats(m, stats)}
+            @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}>
+            <mpl-metric-row .measurement=${m} .tone=${toneFor(m, problems)} .stats=${stats} .hideUnits=${hideUnits}></mpl-metric-row>
+          </button>`;
+        })}</div>` : nothing}
+        ${compact && measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
           <button class="gauge-btn" type="button" aria-label=${describeMeasurement(m)}
             @pointerdown=${this._gaugePointerDown} @pointerenter=${this._gaugePointerEnter} @pointerleave=${this._gaugePointerLeave}
             @focus=${this._gaugeFocus} @blur=${this._gaugeBlur}
@@ -430,7 +528,7 @@ export class MaterialPlantCard extends LitElement {
             <mpl-gauge .embedded=${true} .fraction=${m.fraction} .tone=${toneFor(m, problems)} .icon=${m.icon}
               .value=${hideUnits ? '' : formatValue(m.value, m.unit, hideUnits)} .label=${describeMeasurement(m)}></mpl-gauge>
           </button>`)}</div>` : nothing}
-        ${this._tooltip && tooltipText ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip" data-source=${this._tooltipSource}
+        ${compact && this._tooltip && tooltipText ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip" data-source=${this._tooltipSource}
           @pointerenter=${this._tooltipPointerEnter} @pointerleave=${this._tooltipPointerLeave}>
           <span class="tooltip-title">${tooltipText[0]}</span>
           <span class="tooltip-body">${tooltipText[1]}</span>
@@ -439,7 +537,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   static styles = [themeTokens, css`
-    :host { display: block; }
+    :host { display: block; --mpl-tile-gap: 2px; --mpl-tile-margin: 12px; --mpl-tile-padding: 8px 12px 8px 8px; --mpl-tile-corner: 4px; --mpl-tile-outer-corner: 16px; }
     ha-card { position: relative; display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
     .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
     .tooltip[data-source='mouse'] { pointer-events: auto; }
@@ -469,8 +567,11 @@ export class MaterialPlantCard extends LitElement {
     .gauge-btn:hover, .text-btn:hover, .battery:hover { background: color-mix(in srgb, var(--mpl-on-surface) 8%, transparent); }
     .gauge-btn { -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
     .gauge-btn:active, .text-btn:active { background: color-mix(in srgb, var(--mpl-on-surface) 12%, transparent); }
-    .compact .image-btn { width: 40px; height: 40px; }
-    .compact .gauges { margin-top: 8px; }
+    .tiles { display: flex; flex-direction: column; gap: var(--mpl-tile-gap); margin-top: var(--mpl-tile-margin); }
+    .tile-btn { width: 100%; text-align: left; padding: var(--mpl-tile-padding); background: var(--mpl-surface-container-high); border-radius: var(--mpl-tile-corner); --mpl-range-bar-ring: var(--mpl-surface-container-high); }
+    .tile-btn:first-child { border-top-left-radius: var(--mpl-tile-outer-corner); border-top-right-radius: var(--mpl-tile-outer-corner); }
+    .tile-btn:last-child { border-bottom-left-radius: var(--mpl-tile-outer-corner); border-bottom-right-radius: var(--mpl-tile-outer-corner); }
+    .tile-btn:hover { background: color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-container-high)); }
     .warning { color: var(--mpl-error); }
   `];
 }

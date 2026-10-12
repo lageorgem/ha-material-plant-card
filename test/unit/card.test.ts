@@ -4,6 +4,7 @@ import type { HomeAssistant } from 'custom-card-helpers';
 import { MaterialPlantCard } from '../../src/material-plant-card';
 import { DEFAULT_GAUGES, type MaterialPlantCardConfig, type PlantInfo } from '../../src/types';
 import { configForm } from '../../src/config-form';
+import { describeWithStats, type MplMetricRow } from '../../src/full/metric-row';
 
 const ENTITY = 'plant.test';
 const BATTERY = 'sensor.battery';
@@ -12,7 +13,7 @@ type TestState = { state: string; attributes: Record<string, unknown>; last_upda
 const state = (value = 'ok', attributes: Record<string, unknown> = {}, updated = '0'): TestState =>
   ({ state: value, attributes, last_updated: updated });
 const cfg = (overrides: Partial<MaterialPlantCardConfig> = {}): MaterialPlantCardConfig =>
-  ({ type: 'custom:material-plant-card', entity: ENTITY, ...overrides });
+  ({ type: 'custom:material-plant-card', entity: ENTITY, display_type: 'compact', ...overrides });
 const info: PlantInfo = Object.fromEntries(DEFAULT_GAUGES.map((key) => [key, {
   min: 10, max: 50, current: 25, sensor: `sensor.${key}`, unit_of_measurement: '%',
 }]));
@@ -22,7 +23,9 @@ function fakeHass(data: PlantInfo = info) {
     [BATTERY]: state('19'),
     ...Object.fromEntries(DEFAULT_GAUGES.map((key) => [`sensor.${key}`, state('25')])),
   };
-  const callWS = sinon.stub().resolves({ result: data });
+  const callWS = sinon.stub().callsFake(async (msg: Record<string, unknown>) =>
+    msg.type === 'plant/get_info' ? { result: data } :
+      Object.fromEntries((msg.statistic_ids as string[]).map((id) => [id, [{ min: 15, max: 35, mean: 25 }]])));
   return { states, callWS };
 }
 type FakeHass = ReturnType<typeof fakeHass>;
@@ -56,6 +59,186 @@ const gauges = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAl
 
 describe('material-plant-card', () => {
   afterEach(() => sinon.restore());
+
+  describe('full metric tiles and history', () => {
+    const full = (overrides: Partial<MaterialPlantCardConfig> = {}) => cfg({ display_type: undefined, ...overrides });
+    const rows = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAll<MplMetricRow>('mpl-metric-row')];
+    const calls = (hass: FakeHass) => hass.callWS.getCalls().filter((call) => call.args[0].type === 'recorder/statistics_during_period');
+    const clockForStats = () => sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+
+    it('renders ordered grouped 56px tiles at 327px with named sensor actions and no tooltip', async () => {
+      const hass = fakeHass();
+      const card = await mount(full(), hass);
+      card.style.width = '327px';
+      await settleLayout(card);
+      const buttons = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.tile-btn')];
+      expect(buttons).to.have.length(6);
+      expect(rows(card).map((row) => row.measurement.sensor)).to.deep.equal(DEFAULT_GAUGES.map((key) => `sensor.${key}`));
+      const events = sinon.spy();
+      card.addEventListener('hass-more-info', events);
+      for (const [index, button] of buttons.entries()) {
+        const row = rows(card)[index];
+        expect(row.tone).to.equal('ok');
+        expect(row.hideUnits).to.equal(false);
+        expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.stats));
+        expect(button.getBoundingClientRect().height).to.equal(56);
+        const style = getComputedStyle(button);
+        expect(style.borderTopLeftRadius).to.equal(index === 0 ? '16px' : '4px');
+        expect(style.borderTopRightRadius).to.equal(index === 0 ? '16px' : '4px');
+        expect(style.borderBottomLeftRadius).to.equal(index === 5 ? '16px' : '4px');
+        expect(style.borderBottomRightRadius).to.equal(index === 5 ? '16px' : '4px');
+        button.click();
+        expect(events.lastCall.args[0].detail.entityId).to.equal(row.measurement.sensor);
+        button.focus();
+      }
+      await settle(card);
+      expect(query(card, '.tooltip')).to.equal(null);
+      expect(gauges(card)).to.have.length(0);
+      card.setConfig(full({ show_bars: ['temperature'], hide_units: true }));
+      await settle(card);
+      const style = getComputedStyle(query(card, '.tile-btn'));
+      expect([style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius]).to.deep.equal(['16px', '16px', '16px', '16px']);
+      expect(rows(card)[0].hideUnits).to.equal(true);
+      expect(card.getCardSize()).to.equal(3);
+      card.remove();
+    });
+
+    it('waits for info then fetches only rendered sensor ids once and extends stats with live values', async () => {
+      const hass = fakeHass();
+      let resolve!: (value: { result: PlantInfo }) => void;
+      hass.callWS.onFirstCall().returns(new Promise((done) => { resolve = done; }));
+      const card = await mount(full({ show_bars: ['temperature', 'missing', 'moisture'] }), hass);
+      expect(calls(hass)).to.have.length(0);
+      resolve({ result: info });
+      await settle(card);
+      await settle(card);
+      expect(calls(hass)).to.have.length(1);
+      expect(calls(hass)[0].args[0].statistic_ids).to.deep.equal(['sensor.temperature', 'sensor.moisture']);
+      expect(rows(card)[1].stats).to.deep.equal({ min: 15, max: 35, mean: 25 });
+      assign(card, { ...hass, states: { ...hass.states, 'sensor.moisture': state('60') } });
+      await settle(card);
+      expect(rows(card)[1].stats).to.deep.equal({ min: 15, max: 60, mean: 25 });
+      expect(calls(hass)).to.have.length(1);
+      card.remove();
+    });
+
+    it('refetches every ten minutes and keeps good history on error', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      const card = await mount(full(), hass);
+      await settle(card);
+      expect(calls(hass)).to.have.length(1);
+      hass.callWS.onCall(hass.callWS.callCount).rejects(new Error('offline'));
+      await clock.tickAsync(600000);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      expect(rows(card)[0].stats).to.deep.equal({ min: 15, max: 35, mean: 25 });
+      await clock.tickAsync(600000);
+      expect(calls(hass)).to.have.length(3);
+      card.remove();
+    });
+
+    it('coalesces rapid configs and ignores stale history responses', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      let resolve!: (value: Record<string, { min: number; max: number; mean: number }[]>) => void;
+      hass.callWS.onSecondCall().returns(new Promise((done) => { resolve = done; }));
+      const card = await mount(full(), hass);
+      card.setConfig(full({ show_bars: ['temperature'] }));
+      await settle(card);
+      card.setConfig(full({ show_bars: ['moisture'] }));
+      await settle(card);
+      resolve({ 'sensor.moisture': [{ min: 1, max: 99, mean: 50 }] });
+      await settle(card);
+      expect(rows(card)[0].stats).to.equal(null);
+      await clock.tickAsync(59999);
+      expect(calls(hass)).to.have.length(1);
+      await clock.tickAsync(1);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      expect(calls(hass)[1].args[0].statistic_ids).to.deep.equal(['sensor.moisture']);
+      expect(rows(card)[0].stats).to.deep.equal({ min: 15, max: 35, mean: 25 });
+      card.remove();
+    });
+
+    it('refetches when the rendered sensor set changes without a config change', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      const card = await mount(full({ show_bars: ['moisture', 'temperature'] }), hass);
+      await settle(card);
+      const states = { ...hass.states };
+      delete states['sensor.temperature'];
+      assign(card, { ...hass, states });
+      await settle(card);
+      await clock.tickAsync(60000);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      expect(calls(hass)[1].args[0].statistic_ids).to.deep.equal(['sensor.moisture']);
+      expect(rows(card)).to.have.length(1);
+      card.remove();
+    });
+
+    it('does not fetch for an empty sensor set and uses plant more-info for a sensorless tile', async () => {
+      const hass = fakeHass({ temperature: { current: 20, min: 0, max: 40 } });
+      const card = await mount(full({ show_bars: ['temperature'] }), hass);
+      const moreInfo = sinon.spy();
+      card.addEventListener('hass-more-info', moreInfo);
+      query(card, '.tile-btn').click();
+      expect(moreInfo.firstCall.args[0].detail.entityId).to.equal(ENTITY);
+      expect(rows(card)[0].stats).to.equal(null);
+      expect(calls(hass)).to.have.length(0);
+      card.setConfig(full({ show_bars: [] }));
+      await settle(card);
+      expect(rows(card)).to.have.length(0);
+      expect(card.getCardSize()).to.equal(2);
+      card.remove();
+    });
+
+    for (const config of [full({ hide_history: true }), cfg()]) {
+      it(`does not fetch history for ${config.hide_history ? 'hide_history' : 'compact'}`, async () => {
+        const clock = clockForStats();
+        const hass = fakeHass();
+        const card = await mount(config, hass);
+        await clock.tickAsync(600000);
+        expect(calls(hass)).to.have.length(0);
+        for (const row of rows(card)) expect(row.stats).to.equal(null);
+        expect(clock.countTimers()).to.equal(0);
+        card.remove();
+      });
+    }
+
+    it('drops history and stops its timer when disabled or switched to compact', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      const card = await mount(full(), hass);
+      await settle(card);
+      card.setConfig(full({ hide_history: true }));
+      await settle(card);
+      expect(rows(card).every((row) => row.stats === null)).to.equal(true);
+      expect(clock.countTimers()).to.equal(0);
+      card.setConfig(cfg());
+      await settle(card);
+      await clock.tickAsync(600000);
+      expect(calls(hass)).to.have.length(1);
+      card.remove();
+    });
+
+    it('clears history timer on disconnect and refetches on reconnect after ten minutes', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      const card = await mount(full(), hass);
+      await settle(card);
+      card.remove();
+      expect(clock.countTimers()).to.equal(0);
+      await clock.tickAsync(600001);
+      expect(calls(hass)).to.have.length(1);
+      document.body.append(card);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      card.remove();
+      expect(clock.countTimers()).to.equal(0);
+    });
+  });
 
   it('validates plant entity configuration', () => {
     const card = new MaterialPlantCard();
@@ -548,8 +731,8 @@ describe('material-plant-card', () => {
     });
   }
 
-  it('hides species when requested and in compact mode', async () => {
-    for (const config of [cfg({ hide_species: true }), cfg({ display_type: 'compact' })]) {
+  it('hides species only when requested in either mode', async () => {
+    for (const config of [cfg({ hide_species: true }), cfg({ display_type: 'full', hide_species: true })]) {
       expect(query(await mount(config), '.subtitle')).to.equal(null);
     }
   });
@@ -699,10 +882,10 @@ describe('material-plant-card', () => {
   });
 
   it('exposes sizing, grid, form and first-plant stub defaults', async () => {
-    const card = await mount();
-    expect(card.getCardSize()).to.equal(4);
+    const card = await mount(cfg({ display_type: undefined }));
+    expect(card.getCardSize()).to.equal(2 + DEFAULT_GAUGES.length);
     card.setConfig(cfg({ display_type: 'compact' }));
-    expect(card.getCardSize()).to.equal(3);
+    expect(card.getCardSize()).to.equal(4);
     expect(card.getGridOptions()).to.deep.equal({ columns: 6, min_columns: 4, rows: 'auto' });
     expect(MaterialPlantCard.getConfigForm()).to.equal(configForm);
     expect(MaterialPlantCard.getStubConfig({ states: { 'light.first': state(), 'plant.first': state(), 'plant.second': state() } } as unknown as HomeAssistant))
@@ -710,12 +893,14 @@ describe('material-plant-card', () => {
     expect(MaterialPlantCard.getStubConfig({ states: {} } as HomeAssistant).entity).to.equal('plant.my_plant');
   });
 
-  it('hides gauge values in compact by default, with explicit override', async () => {
+  it('keeps species, 56px photo and units in compact, with explicit hide override', async () => {
     const card = await mount(cfg({ display_type: 'compact' }));
-    expect(gauges(card)[0]).to.have.property('value', '');
-    card.setConfig(cfg({ display_type: 'compact', hide_units: false }));
-    await settle(card);
+    expect(query(card, '.subtitle').textContent).to.equal('Phalaenopsis');
+    expect(getComputedStyle(query(card, '.image-btn')).width).to.equal('56px');
     expect(gauges(card)[0]).to.have.property('value', '25%');
+    card.setConfig(cfg({ display_type: 'compact', hide_units: true }));
+    await settle(card);
+    expect(gauges(card)[0]).to.have.property('value', '');
   });
 
   it('falls back to masked placeholder on image error and retries a new source', async () => {
