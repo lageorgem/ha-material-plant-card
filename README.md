@@ -256,7 +256,7 @@ npm run deploy
 
 The deploy script temporarily serves the bundle from the development machine. Home Assistant must reach that machine on port **8799**, or the port configured with `DEPLOY_PORT`. Set `LAN_HOST` to override automatic LAN address detection if needed.
 
-The bundle is content-addressed and registered as a dashboard resource only after its **SHA-256 is verified**. Reload the dashboard after deployment. Release history: [CHANGELOG.md](CHANGELOG.md).
+Each deployment downloads the bundle to a new, uniquely named file (never overwriting an existing one) and registers it as a dashboard resource only after its **SHA-256 is verified** over HTTPS. Plain-HTTP `HA_URL` values are refused unless `HA_ALLOW_INSECURE=1` is set. Reload the dashboard after deployment. Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Credits
 
