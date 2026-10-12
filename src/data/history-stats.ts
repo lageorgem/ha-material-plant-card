@@ -97,6 +97,7 @@ export interface HistoryResult {
   range: Record<string, Stats24h>;
   dailyTotals: Record<string, Stats24h>;
   daytime: Record<string, Stats24h>;
+  failedGroups: { range: boolean; dailyTotals: boolean; daytime: boolean };
   failed: boolean;
 }
 
@@ -105,7 +106,10 @@ export async function fetchHistoryStats(
   req: HistoryRequest,
   now: number = Date.now(),
 ): Promise<HistoryResult> {
-  const result: HistoryResult = { range: {}, dailyTotals: {}, daytime: {}, failed: false };
+  const result: HistoryResult = {
+    range: {}, dailyTotals: {}, daytime: {}, failed: false,
+    failedGroups: { range: false, dailyTotals: false, daytime: false },
+  };
   await Promise.all([
     (async () => {
       const ids = [...new Set(req.range)];
@@ -125,7 +129,7 @@ export async function fetchHistoryStats(
         }
         result.range = range;
       } catch {
-        result.failed = true;
+        result.failedGroups.range = true;
       }
     })(),
     (async () => {
@@ -149,7 +153,7 @@ export async function fetchHistoryStats(
         }
         result.dailyTotals = dailyTotals;
       } catch {
-        result.failed = true;
+        result.failedGroups.dailyTotals = true;
       }
     })(),
     (async () => {
@@ -173,9 +177,10 @@ export async function fetchHistoryStats(
         }
         result.daytime = daytime;
       } catch {
-        result.failed = true;
+        result.failedGroups.daytime = true;
       }
     })(),
   ]);
+  result.failed = result.failedGroups.range || result.failedGroups.dailyTotals || result.failedGroups.daytime;
   return result;
 }

@@ -160,7 +160,8 @@ describe('fetchHistoryStats', () => {
       .to.deep.equal({ range: {
       'sensor.moisture': { min: 10, max: 18, mean: 13 },
       'sensor.temperature': { min: 20, max: 24, mean: 22 },
-    }, dailyTotals: {}, daytime: {}, failed: false });
+    }, dailyTotals: {}, daytime: {}, failed: false,
+    failedGroups: { range: false, dailyTotals: false, daytime: false } });
     expect(messages).to.deep.equal([{
       type: 'recorder/statistics_during_period',
       start_time: new Date(now - 86400000).toISOString(),
@@ -183,7 +184,8 @@ describe('fetchHistoryStats', () => {
       },
     };
     expect(await fetchHistoryStats(hass, { range: [], dailyTotals: [], daytime: [], window: '7d' }, now))
-      .to.deep.equal({ range: {}, dailyTotals: {}, daytime: {}, failed: false });
+      .to.deep.equal({ range: {}, dailyTotals: {}, daytime: {}, failed: false,
+        failedGroups: { range: false, dailyTotals: false, daytime: false } });
     expect(calls).to.equal(0);
   });
 
@@ -197,7 +199,8 @@ describe('fetchHistoryStats', () => {
     };
     expect(await fetchHistoryStats(hass, {
       range: ['sensor.moisture'], dailyTotals: ['sensor.dli'], daytime: [], window: '24h',
-    }, now)).to.deep.equal({ range: {}, dailyTotals: {}, daytime: {}, failed: true });
+    }, now)).to.deep.equal({ range: {}, dailyTotals: {}, daytime: {}, failed: true,
+      failedGroups: { range: true, dailyTotals: true, daytime: false } });
     expect(calls).to.equal(2);
   });
 
@@ -250,6 +253,7 @@ describe('fetchHistoryStats', () => {
       range: { 'sensor.shared': { min: 1, max: 3, mean: 2 } },
       dailyTotals: { 'sensor.shared': { min: 7, max: 9, mean: 8 } },
       daytime: { 'sensor.light': { min: 500, max: 500, mean: 500 } }, failed: false,
+      failedGroups: { range: false, dailyTotals: false, daytime: false },
     });
     expect(request.range).to.have.length(2);
     expect(request.dailyTotals).to.have.length(5);
@@ -268,6 +272,7 @@ describe('fetchHistoryStats', () => {
       range: [], dailyTotals: ['sensor.dli'], daytime: [], window: '24h',
     }, now)).to.deep.equal({
       range: {}, dailyTotals: { 'sensor.dli': { min: 9, max: 9, mean: 9 } }, daytime: {}, failed: false,
+      failedGroups: { range: false, dailyTotals: false, daytime: false },
     });
     expect(messages).to.have.length(1);
     expect(messages[0].period).to.equal('day');
@@ -292,6 +297,7 @@ describe('fetchHistoryStats', () => {
         dailyTotals: failedPeriod === 'day' ? {} : { 'sensor.dli': { min: 9, max: 9, mean: 9 } },
         daytime: {},
         failed: true,
+        failedGroups: { range: failedPeriod === 'hour', dailyTotals: failedPeriod === 'day', daytime: false },
       });
       expect(messages).to.have.length(2);
     });
@@ -301,7 +307,8 @@ describe('fetchHistoryStats', () => {
     const hass = { callWS: <T>(): Promise<T> => { throw new Error('Disconnected'); } };
     expect(await fetchHistoryStats(hass, {
       range: ['sensor.moisture'], dailyTotals: ['sensor.dli'], daytime: ['sensor.light'], window: '24h',
-    }, now)).to.deep.equal({ range: {}, dailyTotals: {}, daytime: {}, failed: true });
+    }, now)).to.deep.equal({ range: {}, dailyTotals: {}, daytime: {}, failed: true,
+      failedGroups: { range: true, dailyTotals: true, daytime: true } });
   });
 
   it('sends the exact 24h raw-history request and aggregates daytime only', async () => {
@@ -321,6 +328,7 @@ describe('fetchHistoryStats', () => {
     }, now)).to.deep.equal({
       range: {}, dailyTotals: {}, daytime: { 'sensor.light': { min: 500, max: 2000, mean: 1250 } },
       failed: false,
+      failedGroups: { range: false, dailyTotals: false, daytime: false },
     });
     expect(messages).to.deep.equal([{
       type: 'history/history_during_period', start_time: new Date(now - 86400000).toISOString(),
@@ -343,6 +351,7 @@ describe('fetchHistoryStats', () => {
     }, now)).to.deep.equal({
       range: { 'sensor.moisture': { min: 1, max: 3, mean: 2 } },
       dailyTotals: { 'sensor.dli': { min: 9, max: 9, mean: 9 } }, daytime: {}, failed: true,
+      failedGroups: { range: false, dailyTotals: false, daytime: true },
     });
   });
 });
