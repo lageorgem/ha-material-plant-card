@@ -50,6 +50,10 @@ The dashboard above shows eleven plants. This single-card view shows a plant nee
 
 <img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/card-problem-dark.png" alt="Plant card with a problem summary and alert badge on the photo" width="327">
 
+Long-press (or hover) a gauge for its tooltip with the metric, value and ideal range:
+
+<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/tooltip-dark.png" alt="Gauge tooltip showing Air humidity too high, 65.6 % with an ideal range of 20–60 %" width="327">
+
 Copy the [full-options example](examples/card.yaml) or [migration example](examples/migrate-from-flower-card.yaml). Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Installation
