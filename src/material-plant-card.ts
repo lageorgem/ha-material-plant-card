@@ -329,9 +329,10 @@ export class MaterialPlantCard extends LitElement {
   }
 
   public getCardSize(): number {
-    return this._config?.display_type === 'compact' ? 4 : 2 +
-      (this.hass && this._config && this.hass.states[this._config.entity]
-        ? buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states).length : 0);
+    if (this._config?.display_type === 'compact') return 4;
+    const n = this.hass && this._config && this.hass.states[this._config.entity]
+      ? buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states).length : 0;
+    return Math.ceil((100 + n * 86) / 50);
   }
   public getGridOptions(): { columns: number; min_columns: number; rows: 'auto' } {
     return { columns: 6, min_columns: 4, rows: 'auto' };
@@ -514,9 +515,10 @@ export class MaterialPlantCard extends LitElement {
         </div>
         ${!compact && measurements.length ? html`<div class="tiles">${measurements.map((m) => {
           const stats = cfg.hide_history ? null : withCurrent(m.sensor ? this._statsMap[m.sensor] ?? null : null, m.value);
-          return html`<button class="tile-btn" type="button" aria-label=${describeWithStats(m, stats)}
+          const tone = toneFor(m, problems);
+          return html`<button class=${`tile-btn${tone === 'problem' ? ' problem' : ''}`} type="button" aria-label=${describeWithStats(m, stats)}
             @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}>
-            <mpl-metric-row .measurement=${m} .tone=${toneFor(m, problems)} .stats=${stats} .hideUnits=${hideUnits}></mpl-metric-row>
+            <mpl-metric-row .measurement=${m} .tone=${tone} .stats=${stats} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
           </button>`;
         })}</div>` : nothing}
         ${compact && measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
@@ -537,7 +539,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   static styles = [themeTokens, css`
-    :host { display: block; --mpl-tile-gap: 2px; --mpl-tile-margin: 12px; --mpl-tile-padding: 8px; --mpl-tile-corner: 4px; --mpl-tile-outer-corner: 16px; }
+    :host { display: block; --mpl-tile-gap: 2px; --mpl-tile-margin: 12px; --mpl-tile-padding: 8px 12px; --mpl-tile-corner: 4px; --mpl-tile-outer-corner: 16px; }
     ha-card { position: relative; display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
     .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
     .tooltip[data-source='mouse'] { pointer-events: auto; }
@@ -569,9 +571,10 @@ export class MaterialPlantCard extends LitElement {
     .gauge-btn:active, .text-btn:active { background: color-mix(in srgb, var(--mpl-on-surface) 12%, transparent); }
     .tiles { display: flex; flex-direction: column; gap: var(--mpl-tile-gap); margin-top: var(--mpl-tile-margin); }
     .tile-btn { width: 100%; text-align: left; padding: var(--mpl-tile-padding); background: var(--mpl-surface-container-high); border-radius: var(--mpl-tile-corner); --mpl-range-bar-ring: var(--mpl-surface-container-high); }
+    .tile-btn.problem { box-shadow: inset 4px 0 0 var(--mpl-error); background: linear-gradient(to right, var(--mpl-surface-container-high) 45%, color-mix(in srgb, var(--mpl-error-container) 40%, var(--mpl-surface-container-high))); }
     .tile-btn:first-child { border-top-left-radius: var(--mpl-tile-outer-corner); border-top-right-radius: var(--mpl-tile-outer-corner); }
     .tile-btn:last-child { border-bottom-left-radius: var(--mpl-tile-outer-corner); border-bottom-right-radius: var(--mpl-tile-outer-corner); }
-    .tile-btn:hover { background: color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-container-high)); }
+    .tile-btn:hover { background-color: color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-container-high)); }
     .warning { color: var(--mpl-error); }
   `];
 }

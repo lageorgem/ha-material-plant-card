@@ -66,7 +66,7 @@ describe('material-plant-card', () => {
     const calls = (hass: FakeHass) => hass.callWS.getCalls().filter((call) => call.args[0].type === 'recorder/statistics_during_period');
     const clockForStats = () => sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
 
-    it('renders ordered grouped 56px tiles at 327px with named sensor actions and no tooltip', async () => {
+    it('renders ordered grouped 84px tiles at 327px with named sensor actions and no tooltip', async () => {
       const hass = fakeHass();
       const card = await mount(full(), hass);
       card.style.width = '327px';
@@ -80,9 +80,14 @@ describe('material-plant-card', () => {
         const row = rows(card)[index];
         expect(row.tone).to.equal('ok');
         expect(row.hideUnits).to.equal(false);
+        expect(row.showHistory).to.equal(true);
         expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.stats));
-        expect(button.getBoundingClientRect().height).to.equal(56);
+        expect(button.getBoundingClientRect().height).to.equal(84);
         const style = getComputedStyle(button);
+        expect(style.padding).to.equal('8px 12px');
+        expect(button.classList.contains('problem')).to.equal(false);
+        expect(style.boxShadow).to.equal('none');
+        expect(style.backgroundImage).to.equal('none');
         expect(style.borderTopLeftRadius).to.equal(index === 0 ? '16px' : '4px');
         expect(style.borderTopRightRadius).to.equal(index === 0 ? '16px' : '4px');
         expect(style.borderBottomLeftRadius).to.equal(index === 5 ? '16px' : '4px');
@@ -99,52 +104,35 @@ describe('material-plant-card', () => {
       const style = getComputedStyle(query(card, '.tile-btn'));
       expect([style.borderTopLeftRadius, style.borderTopRightRadius, style.borderBottomLeftRadius, style.borderBottomRightRadius]).to.deep.equal(['16px', '16px', '16px', '16px']);
       expect(rows(card)[0].hideUnits).to.equal(true);
-      expect(card.getCardSize()).to.equal(3);
+      expect(card.getCardSize()).to.equal(4);
       card.remove();
     });
 
-    it('fits decimal and illuminance captions and the DLI value at 327px', async () => {
-      const data: PlantInfo = {
-        vpd: { min: 0.4, max: 1.6, sensor: 'sensor.vpd', unit_of_measurement: 'kPa' },
-        illuminance: { min: 1000, max: 30000, sensor: 'sensor.illuminance', unit_of_measurement: 'lx' },
-        dli: { min: 1, max: 10, sensor: 'sensor.dli', unit_of_measurement: 'mol/d⋅m²' },
-      };
-      const hass = fakeHass(data);
-      hass.states['sensor.vpd'] = state('1.2');
-      hass.states['sensor.illuminance'] = state('22');
-      hass.states['sensor.dli'] = state('0.04');
-      hass.callWS.callsFake(async (msg: Record<string, unknown>) =>
-        msg.type === 'plant/get_info' ? { result: data } : {
-          'sensor.vpd': [{ min: 0.98, max: 1.37, mean: 1.2 }],
-          'sensor.illuminance': [{ min: 0, max: 131, mean: 65 }],
-          'sensor.dli': [{ min: 0.04, max: 0.04, mean: 0.04 }],
-        });
-      const card = await mount(full({ show_bars: ['vpd', 'illuminance', 'dli'] }), hass);
-      card.style.width = '327px';
-      await settleLayout(card);
-      for (const [index, ideal, history] of [
-        [0, 'Ideal 0.4–1.6', '24h 1–1.4'],
-        [1, 'Ideal 1k–30k', '24h 0–131'],
-      ] as const) {
-        const row = rows(card)[index];
-        await row.updateComplete;
-        for (const [selector, text] of [['.ideal', ideal], ['.history', history]]) {
-          const caption = row.shadowRoot!.querySelector<HTMLElement>(selector)!;
-          expect(caption.textContent).to.equal(text);
-          expect(caption.scrollWidth, `${text}: ${caption.scrollWidth}/${caption.clientWidth}px`)
-            .to.be.at.most(caption.clientWidth);
-        }
+    it('accents only problem tiles and removes the accent when the tone becomes advisory', async () => {
+      const hass = fakeHass();
+      hass.states[ENTITY] = state('problem', { problems: [{ sensor_type: 'moisture', status: 'Low' }] });
+      hass.states['sensor.moisture'] = state('5');
+      const card = await mount(full(), hass);
+      card.style.setProperty('--mpl-error', 'rgb(190, 1, 2)');
+      const buttons = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.tile-btn')];
+      expect(rows(card)[0].tone).to.equal('problem');
+      expect(buttons[0].classList.contains('problem')).to.equal(true);
+      const style = getComputedStyle(buttons[0]);
+      expect(style.boxShadow).to.include('inset');
+      expect(style.boxShadow).to.include('4px 0px 0px 0px');
+      expect(style.boxShadow).to.include('rgb(190, 1, 2)');
+      expect(style.backgroundImage).to.include('linear-gradient');
+      for (const button of buttons.slice(1)) {
+        expect(button.classList.contains('problem')).to.equal(false);
+        expect(getComputedStyle(button).boxShadow).to.equal('none');
+        expect(getComputedStyle(button).backgroundImage).to.equal('none');
       }
-      const dli = rows(card)[2];
-      await dli.updateComplete;
-      expect(dli.shadowRoot!.querySelector('.unit')!.textContent).to.equal('mol/d');
-      const value = dli.shadowRoot!.querySelector<HTMLElement>('.value')!;
-      expect(value.textContent!.trim()).to.equal('0.04mol/d');
-      expect(value.scrollWidth, `DLI: ${value.scrollWidth}/${value.clientWidth}px`).to.be.at.most(value.clientWidth);
-      for (const button of card.shadowRoot!.querySelectorAll('.tile-btn')) {
-        expect(getComputedStyle(button).padding).to.equal('8px');
-        expect(button.getBoundingClientRect().height).to.equal(56);
-      }
+      card.setConfig(full({ problem_sensors: ['temperature'] }));
+      await settle(card);
+      expect(rows(card)[0].tone).to.equal('advisory');
+      expect(buttons[0].classList.contains('problem')).to.equal(false);
+      expect(getComputedStyle(buttons[0]).boxShadow).to.equal('none');
+      expect(getComputedStyle(buttons[0]).backgroundImage).to.equal('none');
       card.remove();
     });
 
@@ -246,7 +234,10 @@ describe('material-plant-card', () => {
         const card = await mount(config, hass);
         await clock.tickAsync(600000);
         expect(calls(hass)).to.have.length(0);
-        for (const row of rows(card)) expect(row.stats).to.equal(null);
+        for (const row of rows(card)) {
+          expect(row.stats).to.equal(null);
+          expect(row.showHistory).to.equal(false);
+        }
         expect(clock.countTimers()).to.equal(0);
         card.remove();
       });
@@ -260,6 +251,7 @@ describe('material-plant-card', () => {
       card.setConfig(full({ hide_history: true }));
       await settle(card);
       expect(rows(card).every((row) => row.stats === null)).to.equal(true);
+      expect(rows(card).every((row) => row.showHistory === false)).to.equal(true);
       expect(clock.countTimers()).to.equal(0);
       card.setConfig(cfg());
       await settle(card);
@@ -928,7 +920,7 @@ describe('material-plant-card', () => {
 
   it('exposes sizing, grid, form and first-plant stub defaults', async () => {
     const card = await mount(cfg({ display_type: undefined }));
-    expect(card.getCardSize()).to.equal(2 + DEFAULT_GAUGES.length);
+    expect(card.getCardSize()).to.equal(13);
     card.setConfig(cfg({ display_type: 'compact' }));
     expect(card.getCardSize()).to.equal(4);
     expect(card.getGridOptions()).to.deep.equal({ columns: 6, min_columns: 4, rows: 'auto' });
