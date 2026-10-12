@@ -1,0 +1,141 @@
+import { fixture, html, expect } from '@open-wc/testing';
+import { arcPath, MplGauge } from '../../src/gauge/plant-gauge';
+import type { GaugeTone } from '../../src/types';
+
+async function mount(fraction: number | null = null, tone: GaugeTone = 'unknown') {
+  return fixture<MplGauge>(html`
+    <mpl-gauge
+      .fraction=${fraction}
+      .tone=${tone}
+      icon="mdi:water"
+      value="13%"
+      label="Moisture: 13% (15–65%)"
+    ></mpl-gauge>
+  `);
+}
+
+function pathNumbers(path: string): number[] {
+  return path.match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi)!.map(Number);
+}
+
+describe('arcPath', () => {
+  it('uses clockwise SVG coordinates measured from the positive x axis', () => {
+    const numbers = pathNumbers(arcPath(24, 24, 20, 0, 90));
+    expect(numbers).to.deep.equal([44, 24, 20, 20, 0, 0, 1, 24, 44]);
+  });
+
+  for (const [sweep, flag] of [[90, 0], [180, 0], [181, 1], [270, 1]]) {
+    it(`sets the large-arc flag to ${flag} for a ${sweep}° sweep`, () => {
+      const numbers = pathNumbers(arcPath(24, 24, 20, 135, 135 + sweep));
+      expect(numbers[5]).to.equal(flag);
+      expect(numbers[6]).to.equal(1);
+    });
+  }
+});
+
+describe('mpl-gauge', () => {
+  it('registers the exported class and defaults to an unknown, empty gauge', async () => {
+    const el = await fixture<MplGauge>(html`<mpl-gauge></mpl-gauge>`);
+    expect(customElements.get('mpl-gauge')).to.equal(MplGauge);
+    expect(el.fraction).to.equal(null);
+    expect(el.tone).to.equal('unknown');
+    expect(el.getAttribute('tone')).to.equal('unknown');
+    expect(el.shadowRoot!.querySelector('.active')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.dot')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.value')).to.equal(null);
+  });
+
+  it('renders three SVG zone paths with four-degree gaps', async () => {
+    const el = await mount();
+    const root = el.shadowRoot!;
+    expect(root.querySelectorAll('svg path').length).to.equal(3);
+    for (const [selector, start, end] of [
+      ['.track-low', 135, 187],
+      ['.track-ok', 191, 349],
+      ['.track-high', 353, 405],
+    ] as const) {
+      const track = root.querySelector(selector)!;
+      expect(track.namespaceURI).to.equal('http://www.w3.org/2000/svg');
+      expect(track.getAttribute('d')).to.equal(arcPath(24, 24, 20, start, end));
+      expect(getComputedStyle(track).strokeWidth).to.equal('4px');
+      expect(getComputedStyle(track).strokeLinecap).to.equal('round');
+    }
+  });
+
+  for (const tone of ['ok', 'advisory', 'problem'] as const) {
+    for (const fraction of [0.1, 0.2, 0.5, 0.8, 1]) {
+      it(`renders the active arc and dot for ${tone} at ${fraction}`, async () => {
+        const el = await mount(fraction, tone);
+        const active = el.shadowRoot!.querySelector('.active')!;
+        const dot = el.shadowRoot!.querySelector('.dot')!;
+        expect(el.getAttribute('tone')).to.equal(tone);
+        expect(active.namespaceURI).to.equal('http://www.w3.org/2000/svg');
+        expect(active.getAttribute('d')).to.equal(arcPath(24, 24, 20, 135, 135 + 270 * fraction));
+        const radians = (135 + 270 * fraction) * Math.PI / 180;
+        expect(Number(dot.getAttribute('cx'))).to.be.closeTo(24 + 20 * Math.cos(radians), 0.01);
+        expect(Number(dot.getAttribute('cy'))).to.be.closeTo(24 + 20 * Math.sin(radians), 0.01);
+        expect(dot.getAttribute('r')).to.equal('3.5');
+        expect(getComputedStyle(dot).strokeWidth).to.equal('2px');
+      });
+    }
+
+    it(`shows only the start dot for ${tone} at zero`, async () => {
+      const el = await mount(0, tone);
+      expect(el.shadowRoot!.querySelector('.active')).to.equal(null);
+      const dot = el.shadowRoot!.querySelector('.dot')!;
+      expect(Number(dot.getAttribute('cx'))).to.be.closeTo(24 - 20 / Math.sqrt(2), 0.01);
+      expect(Number(dot.getAttribute('cy'))).to.be.closeTo(24 + 20 / Math.sqrt(2), 0.01);
+      expect(el.shadowRoot!.querySelector('.gauge')!.getAttribute('aria-valuenow')).to.equal('0');
+    });
+  }
+
+  for (const tone of ['ok', 'advisory', 'problem', 'unknown'] as const) {
+    it(`omits the active arc, dot and aria-valuenow for null with ${tone}`, async () => {
+      const el = await mount(null, tone);
+      expect(el.shadowRoot!.querySelector('.active')).to.equal(null);
+      expect(el.shadowRoot!.querySelector('.dot')).to.equal(null);
+      expect(el.shadowRoot!.querySelector('.gauge')!.hasAttribute('aria-valuenow')).to.equal(false);
+    });
+  }
+
+  it('omits active geometry for unknown tone even with a fraction', async () => {
+    const el = await mount(0.5, 'unknown');
+    expect(el.shadowRoot!.querySelector('.active')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.dot')).to.equal(null);
+  });
+
+  it('sets meter semantics and hides decorative SVG and icon', async () => {
+    const el = await mount(0.456, 'ok');
+    const meter = el.shadowRoot!.querySelector('.gauge')!;
+    expect(meter.getAttribute('role')).to.equal('meter');
+    expect(meter.getAttribute('aria-label')).to.equal(el.label);
+    expect(meter.getAttribute('aria-valuetext')).to.equal(el.label);
+    expect(meter.getAttribute('aria-valuemin')).to.equal('0');
+    expect(meter.getAttribute('aria-valuemax')).to.equal('100');
+    expect(meter.getAttribute('aria-valuenow')).to.equal('46');
+    expect(el.shadowRoot!.querySelector('svg')!.getAttribute('aria-hidden')).to.equal('true');
+    const icon = el.shadowRoot!.querySelector('ha-icon')!;
+    expect(icon.getAttribute('aria-hidden')).to.equal('true');
+    expect(icon.getAttribute('icon')).to.equal('mdi:water');
+  });
+
+  it('renders value text verbatim and removes it when empty', async () => {
+    const el = await mount();
+    expect(el.shadowRoot!.querySelector('.value')!.textContent).to.equal('13%');
+    el.value = '';
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.value')).to.equal(null);
+  });
+
+  it('updates reflected tone and removes stale active geometry and aria value', async () => {
+    const el = await mount(0.5, 'ok');
+    el.tone = 'problem';
+    await el.updateComplete;
+    expect(el.getAttribute('tone')).to.equal('problem');
+    el.fraction = null;
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.active')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.dot')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.gauge')!.hasAttribute('aria-valuenow')).to.equal(false);
+  });
+});
