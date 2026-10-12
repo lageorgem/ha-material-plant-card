@@ -1,4 +1,5 @@
 import { fixture, html, expect } from '@open-wc/testing';
+import { emulateMedia } from '@web/test-runner-commands';
 import { arcPath, MplGauge } from '../../src/gauge/plant-gauge';
 import type { GaugeTone } from '../../src/types';
 
@@ -34,6 +35,34 @@ describe('arcPath', () => {
 });
 
 describe('mpl-gauge', () => {
+  describe('motion preferences', () => {
+    afterEach(async () => {
+      await emulateMedia({ reducedMotion: null });
+    });
+
+    it('disables active arc and dot transitions when reduced motion is requested', async () => {
+      await emulateMedia({ reducedMotion: 'no-preference' });
+      const el = await mount(0.5, 'ok');
+      const indicators = ['.active', '.dot'].map(selector => ({
+        selector,
+        element: el.shadowRoot!.querySelector(selector)!,
+      }));
+
+      for (const { selector, element } of indicators) {
+        const durations = getComputedStyle(element).transitionDuration.split(',').map(parseFloat);
+        expect(durations.every(duration => duration > 0), `${selector} normally animates`).to.equal(true);
+      }
+
+      await emulateMedia({ reducedMotion: 'reduce' });
+      expect(matchMedia('(prefers-reduced-motion: reduce)').matches).to.equal(true);
+      for (const { selector, element } of indicators) {
+        const style = getComputedStyle(element);
+        expect(style.transitionProperty, `${selector} reduced-motion transition`).to.equal('none');
+        expect(style.transitionDuration, `${selector} reduced-motion duration`).to.equal('0s');
+      }
+    });
+  });
+
   it('registers the exported class and defaults to an unknown, empty gauge', async () => {
     const el = await fixture<MplGauge>(html`<mpl-gauge></mpl-gauge>`);
     expect(customElements.get('mpl-gauge')).to.equal(MplGauge);
