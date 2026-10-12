@@ -238,7 +238,7 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
-    it('accents only real problem tiles while keeping out-of-bounds values red', async () => {
+    it('tints only real problem tiles without a left accent while keeping out-of-bounds values red', async () => {
       const hass = fakeHass();
       hass.states[ENTITY] = state('problem', { problems: [{ sensor_type: 'moisture', status: 'Low' }] });
       hass.states['sensor.moisture'] = state('5');
@@ -248,9 +248,8 @@ describe('material-plant-card', () => {
       expect(rows(card)[0].tone).to.equal('problem');
       expect(buttons[0].classList.contains('problem')).to.equal(true);
       const style = getComputedStyle(buttons[0]);
-      expect(style.boxShadow).to.include('inset');
-      expect(style.boxShadow).to.include('4px 0px 0px 0px');
-      expect(style.boxShadow).to.include('rgb(190, 1, 2)');
+      expect(style.boxShadow).to.equal('none');
+      expect(style.borderLeftWidth).to.equal('0px');
       expect(style.backgroundImage).to.include('linear-gradient');
       for (const button of buttons.slice(1)) {
         expect(button.classList.contains('problem')).to.equal(false);
