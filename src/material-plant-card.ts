@@ -281,7 +281,7 @@ export class MaterialPlantCard extends LitElement {
     // The data helper returns {} on errors; distinguish failures from valid empty history.
     let failed = false;
     const result = await fetch24hStats({ callWS: async <T>(message: Record<string, unknown>): Promise<T> => {
-      try { return await hass.callWS<T>(message); }
+      try { return await hass.callWS<T>(message as { type: string }); }
       catch (error) { failed = true; throw error; }
     } }, sensors, this._statsLastFetch);
     if (request === this._statsRequest && this.isConnected) {
