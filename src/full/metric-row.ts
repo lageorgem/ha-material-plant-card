@@ -24,9 +24,9 @@ export function formatCaptionNumber(value: number): string {
 }
 
 /** Accessible tile description; the enclosing button owns the accessible name. */
-export function describeWithStats(m: Measurement, stats: Stats24h | null): string {
+export function describeWithStats(m: Measurement, stats: Stats24h | null, period = 'last 24 h'): string {
   return describeMeasurement(m) + (stats
-    ? ` · last 24 h ${formatCaption(stats.min)}–${formatCaption(stats.max)}, average ${formatCaption(stats.mean)}`
+    ? ` · ${period} ${formatCaption(stats.min)}–${formatCaption(stats.max)}, average ${formatCaption(stats.mean)}`
     : '');
 }
 
@@ -37,6 +37,7 @@ export class MplMetricRow extends LitElement {
   @property({ attribute: false }) stats: Stats24h | null = null;
   @property({ type: Boolean, attribute: 'hide-units' }) hideUnits = false;
   @property({ type: Boolean, attribute: 'show-history' }) showHistory = true;
+  @property({ type: String, attribute: 'period-label' }) periodLabel = 'Last 24 h';
 
   protected render(): TemplateResult | typeof nothing {
     const m = this.measurement;
@@ -56,7 +57,7 @@ export class MplMetricRow extends LitElement {
       <div class="title">
         <ha-icon icon=${m.icon} aria-hidden="true"></ha-icon>
         <span class="label">${m.label}</span>
-        ${this.showHistory ? html`<span class="period">Last 24 h</span>` : nothing}
+        ${this.showHistory ? html`<span class="period">${this.periodLabel}</span>` : nothing}
       </div>
       <div class="value">${formatValue(m.value, m.unit, true)}${!this.hideUnits && m.unit !== ''
         ? html`<span class="unit">${displayUnits[m.unit] ?? m.unit}</span>` : nothing}</div>

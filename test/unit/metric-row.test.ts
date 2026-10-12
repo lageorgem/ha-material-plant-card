@@ -63,6 +63,39 @@ describe('mpl-metric-row', () => {
     expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(['1', '1.2', '1.4']);
   });
 
+  it('defaults the period label and reactively renders custom labels only with history', async () => {
+    const el = await row();
+    expect(el.periodLabel).to.equal('Last 24 h');
+    for (const periodLabel of ['Last 7 d', 'Daily · 7 d']) {
+      el.periodLabel = periodLabel;
+      await el.updateComplete;
+      expect(element(el, '.period').textContent).to.equal(periodLabel);
+    }
+    el.showHistory = false;
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.period')).to.equal(null);
+  });
+
+  it('keeps period labels unshrunk beside Soil temperature in a 271px row', async () => {
+    const el = await row({ ...moisture, label: 'Soil temperature' });
+    el.style.width = '271px';
+    el.style.fontFamily = 'Arial, sans-serif';
+    for (const periodLabel of ['Last 24 h', 'Last 7 d', 'Daily · 7 d']) {
+      el.periodLabel = periodLabel;
+      await el.updateComplete;
+      const period = element(el, '.period');
+      const label = element(el, '.label');
+      expect(period.textContent).to.equal(periodLabel);
+      expect(getComputedStyle(period).flexShrink).to.equal('0');
+      expect(period.scrollWidth).to.be.at.most(period.clientWidth);
+      expect(getComputedStyle(label).textOverflow).to.equal('ellipsis');
+      expect(getComputedStyle(label).overflow).to.equal('hidden');
+      expect(getComputedStyle(label).minWidth).to.equal('0px');
+      expect(element(el, '.title').scrollWidth).to.be.at.most(element(el, '.title').clientWidth);
+      expect(el.scrollWidth).to.be.at.most(el.clientWidth);
+    }
+  });
+
   for (const unit of ['mol/d⋅m²', 'mol/d·m²', 'mol/(d⋅m²)']) {
     it(`shortens only the visible ${unit} unit`, async () => {
       const measurement = { ...moisture, key: 'dli', label: 'DLI', value: 0.04, unit };
@@ -259,6 +292,14 @@ describe('formatCaptionNumber', () => {
 describe('describeWithStats', () => {
   it('returns the measurement description unchanged without history', () => {
     expect(describeWithStats(moisture, null)).to.equal(describeMeasurement(moisture));
+    expect(describeWithStats(moisture, null, 'daily totals, last 7 days'))
+      .to.equal(describeMeasurement(moisture));
+  });
+
+  it('uses a supplied period in the accessible statistics description', () => {
+    expect(describeWithStats(moisture, stats, 'daily totals, last 7 days')).to.equal(
+      `${describeMeasurement(moisture)} · daily totals, last 7 days 12–31, average 22`,
+    );
   });
 
   it('adds the formatted range and average without units', () => {
