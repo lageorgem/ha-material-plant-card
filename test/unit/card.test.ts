@@ -256,9 +256,9 @@ describe('material-plant-card', () => {
   it('uses live sensor values without refetching unchanged plant timestamps', async () => {
     const hass = fakeHass();
     const card = await mount(cfg(), hass);
-    assign(card, { ...hass, states: { ...hass.states, 'sensor.moisture': state('13') } });
+    assign(card, { ...hass, states: { ...hass.states, 'sensor.moisture': state('5') } });
     await settle(card);
-    expect(gauges(card)[0]).to.have.property('value', '13%');
+    expect(gauges(card)[0]).to.have.property('value', '5%');
     expect(gauges(card)[0]).to.have.property('tone', 'advisory');
     expect(hass.callWS.callCount).to.equal(1);
     expect(query(card, '.problem-badge')).to.equal(null);
