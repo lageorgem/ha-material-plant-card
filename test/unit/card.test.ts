@@ -103,6 +103,51 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
+    it('fits decimal and illuminance captions and the DLI value at 327px', async () => {
+      const data: PlantInfo = {
+        vpd: { min: 0.4, max: 1.6, sensor: 'sensor.vpd', unit_of_measurement: 'kPa' },
+        illuminance: { min: 1000, max: 30000, sensor: 'sensor.illuminance', unit_of_measurement: 'lx' },
+        dli: { min: 1, max: 10, sensor: 'sensor.dli', unit_of_measurement: 'mol/d⋅m²' },
+      };
+      const hass = fakeHass(data);
+      hass.states['sensor.vpd'] = state('1.2');
+      hass.states['sensor.illuminance'] = state('22');
+      hass.states['sensor.dli'] = state('0.04');
+      hass.callWS.callsFake(async (msg: Record<string, unknown>) =>
+        msg.type === 'plant/get_info' ? { result: data } : {
+          'sensor.vpd': [{ min: 0.98, max: 1.37, mean: 1.2 }],
+          'sensor.illuminance': [{ min: 0, max: 131, mean: 65 }],
+          'sensor.dli': [{ min: 0.04, max: 0.04, mean: 0.04 }],
+        });
+      const card = await mount(full({ show_bars: ['vpd', 'illuminance', 'dli'] }), hass);
+      card.style.width = '327px';
+      await settleLayout(card);
+      for (const [index, ideal, history] of [
+        [0, 'Ideal 0.4–1.6', '24h 1–1.4'],
+        [1, 'Ideal 1k–30k', '24h 0–131'],
+      ] as const) {
+        const row = rows(card)[index];
+        await row.updateComplete;
+        for (const [selector, text] of [['.ideal', ideal], ['.history', history]]) {
+          const caption = row.shadowRoot!.querySelector<HTMLElement>(selector)!;
+          expect(caption.textContent).to.equal(text);
+          expect(caption.scrollWidth, `${text}: ${caption.scrollWidth}/${caption.clientWidth}px`)
+            .to.be.at.most(caption.clientWidth);
+        }
+      }
+      const dli = rows(card)[2];
+      await dli.updateComplete;
+      expect(dli.shadowRoot!.querySelector('.unit')!.textContent).to.equal('mol/d');
+      const value = dli.shadowRoot!.querySelector<HTMLElement>('.value')!;
+      expect(value.textContent!.trim()).to.equal('0.04mol/d');
+      expect(value.scrollWidth, `DLI: ${value.scrollWidth}/${value.clientWidth}px`).to.be.at.most(value.clientWidth);
+      for (const button of card.shadowRoot!.querySelectorAll('.tile-btn')) {
+        expect(getComputedStyle(button).padding).to.equal('8px');
+        expect(button.getBoundingClientRect().height).to.equal(56);
+      }
+      card.remove();
+    });
+
     it('waits for info then fetches only rendered sensor ids once and extends stats with live values', async () => {
       const hass = fakeHass();
       let resolve!: (value: { result: PlantInfo }) => void;

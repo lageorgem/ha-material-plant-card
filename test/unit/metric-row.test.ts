@@ -32,8 +32,12 @@ describe('mpl-metric-row', () => {
     const style = getComputedStyle(el);
     expect(style.display).to.equal('grid');
     expect(style.gridTemplateRows).to.equal('16px 24px');
-    expect(style.gridTemplateColumns.split(' ').slice(0, 2)).to.deep.equal(['40px', '80px']);
-    expect(style.columnGap).to.equal('12px');
+    expect(style.gridTemplateColumns.split(' ').slice(0, 2)).to.deep.equal(['36px', '76px']);
+    expect(style.columnGap).to.equal('10px');
+    expect(getComputedStyle(element(el, '.icon')).width).to.equal('36px');
+    expect(getComputedStyle(element(el, '.icon')).height).to.equal('36px');
+    expect(getComputedStyle(element(el, '.caption')).gap).to.equal('6px');
+    expect(getComputedStyle(element(el, '.history')).flexShrink).to.equal('0');
     expect(el.getBoundingClientRect().height).to.equal(40);
     expect(element(el, '.label').textContent).to.equal('Moisture');
     expect(element(el, '.value').textContent!.trim()).to.equal('13%');
@@ -71,13 +75,14 @@ describe('mpl-metric-row', () => {
     }
   });
 
-  it('clips long DLI units within the value column without shrinking the number', async () => {
-    const el = await row({ ...moisture, value: 0.7, unit: 'mol/d⋅m²' });
+  it('shortens DLI units within the value column without shrinking the number', async () => {
+    const el = await row({ ...moisture, value: 0.04, unit: 'mol/d⋅m²' });
     el.style.width = '295px';
     el.style.fontFamily = 'Arial, sans-serif';
     const value = element(el, '.value');
     const style = getComputedStyle(value);
-    expect(value.textContent!.trim()).to.equal('0.7mol/d⋅m²');
+    expect(value.textContent!.trim()).to.equal('0.04mol/d');
+    expect(value.scrollWidth).to.be.at.most(value.clientWidth);
     expect(value.getBoundingClientRect().right).to.be.at.most(element(el, '.range').getBoundingClientRect().left);
     expect(style.overflow).to.equal('hidden');
     expect(style.whiteSpace).to.equal('nowrap');
@@ -86,6 +91,16 @@ describe('mpl-metric-row', () => {
     expect(style.fontSize).to.equal('20px');
     expect(getComputedStyle(element(el, '.unit')).fontSize).to.equal('11px');
   });
+
+  for (const unit of ['mol/d⋅m²', 'mol/d·m²', 'mol/(d⋅m²)']) {
+    it(`shortens only the visible ${unit} unit`, async () => {
+      const measurement = { ...moisture, key: 'dli', label: 'DLI', value: 0.04, unit };
+      const el = await row(measurement);
+      expect(element(el, '.unit').textContent).to.equal('mol/d');
+      expect(describeWithStats(measurement, stats)).to.include(`0.04 ${unit}`);
+      expect(el.measurement.unit).to.equal(unit);
+    });
+  }
 
   it('omits units when hidden or empty and shows an em dash for a null value', async () => {
     for (const [measurement, hideUnits] of [
@@ -178,7 +193,7 @@ describe('mpl-metric-row', () => {
     }
   });
 
-  it('ellipsizes long labels and captions without expanding the 80px column', async () => {
+  it('ellipsizes long labels and captions without expanding the 76px column', async () => {
     const wrapper = await fixture<HTMLElement>(html`
       <div style="width:287px">
         <mpl-metric-row .measurement=${{ ...moisture, label: 'A very long soil temperature measurement label' }}
@@ -188,7 +203,7 @@ describe('mpl-metric-row', () => {
     const el = wrapper.querySelector('mpl-metric-row')!;
     await el.updateComplete;
     const label = element(el, '.label');
-    expect(label.getBoundingClientRect().width).to.equal(80);
+    expect(label.getBoundingClientRect().width).to.equal(76);
     expect(label.scrollWidth).to.be.greaterThan(label.clientWidth);
     for (const selector of ['.label', '.ideal', '.history']) {
       const style = getComputedStyle(element(el, selector));
@@ -206,7 +221,9 @@ describe('formatCaptionNumber', () => {
     for (const [value, expected] of [
       [53.4, '53'], [62.5, '63'], [1.37, '1.4'], [0.04, '0.04'],
       [1500, '1.5k'], [30000, '30k'], [20.2, '20'], [7.2, '7.2'],
-      [1.25, '1.3'], [0.145, '0.15'], [-1.25, '-1.3'], [-62.5, '-63'],
+      [1.25, '1.3'], [0.145, '0.1'], [-1.25, '-1.3'], [-62.5, '-63'],
+      [0.98, '1'], [0.4, '0.4'], [0.099, '0.1'], [0.045, '0.05'],
+      [-0.98, '-1'], [-0.4, '-0.4'], [-0.045, '-0.05'],
       [-1500, '-1.5k'], [0, '0'], [1, '1'], [0.1, '0.1'], [1e-7, '0'],
     ] as const) {
       expect(formatCaptionNumber(value), String(value)).to.equal(expected);

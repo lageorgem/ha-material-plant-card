@@ -537,7 +537,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   static styles = [themeTokens, css`
-    :host { display: block; --mpl-tile-gap: 2px; --mpl-tile-margin: 12px; --mpl-tile-padding: 8px 12px 8px 8px; --mpl-tile-corner: 4px; --mpl-tile-outer-corner: 16px; }
+    :host { display: block; --mpl-tile-gap: 2px; --mpl-tile-margin: 12px; --mpl-tile-padding: 8px; --mpl-tile-corner: 4px; --mpl-tile-outer-corner: 16px; }
     ha-card { position: relative; display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
     .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
     .tooltip[data-source='mouse'] { pointer-events: auto; }

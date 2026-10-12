@@ -6,12 +6,17 @@ import type { GaugeTone, Measurement } from '../types';
 import './range-bar';
 
 const formatCaption = (value: number): string => formatValue(value, '', true);
+const displayUnits: Readonly<Record<string, string>> = {
+  'mol/d⋅m²': 'mol/d',
+  'mol/d·m²': 'mol/d',
+  'mol/(d⋅m²)': 'mol/d',
+};
 
 /** Compact visual captions; accessible descriptions retain formatValue precision. */
 export function formatCaptionNumber(value: number): string {
   const magnitude = Math.abs(value);
   if (magnitude >= 1000) return formatValue(value, '', true);
-  const digits = magnitude >= 10 ? 0 : magnitude >= 1 ? 1 : 2;
+  const digits = magnitude >= 10 ? 0 : magnitude >= 0.1 ? 1 : 2;
   // Match measurements' decimal-safe rounding, including negative ties.
   const [coefficient, exponent = '0'] = String(magnitude).split('e');
   const shifted = Number(`${coefficient}e${Number(exponent) + digits}`);
@@ -43,7 +48,7 @@ export class MplMetricRow extends LitElement {
       <div class="icon"><ha-icon icon=${m.icon} aria-hidden="true"></ha-icon></div>
       <div class="label">${m.label}</div>
       <div class="value">${formatValue(m.value, m.unit, true)}${!this.hideUnits && m.unit !== ''
-        ? html`<span class="unit">${m.unit}</span>` : nothing}</div>
+        ? html`<span class="unit">${displayUnits[m.unit] ?? m.unit}</span>` : nothing}</div>
       <div class="range">
         <mpl-range-bar
           .value=${fraction(m.value)}
@@ -67,10 +72,10 @@ export class MplMetricRow extends LitElement {
   // Like the battery glyph, inherit semantic tokens rather than masking ancestor overrides.
   static styles = css`
     :host {
-      --mpl-metric-icon-size: 40px;
+      --mpl-metric-icon-size: 36px;
       --mpl-metric-glyph-size: 20px;
-      --mpl-metric-column-width: 80px;
-      --mpl-metric-column-gap: 12px;
+      --mpl-metric-column-width: 76px;
+      --mpl-metric-column-gap: 10px;
       --mpl-metric-label-size: 12px;
       --mpl-metric-label-line: 16px;
       --mpl-metric-value-size: 20px;
@@ -82,7 +87,7 @@ export class MplMetricRow extends LitElement {
       --mpl-metric-range-gap: 2px;
       --mpl-metric-caption-size: 11px;
       --mpl-metric-caption-line: 14px;
-      --mpl-metric-caption-gap: 8px;
+      --mpl-metric-caption-gap: 6px;
       display: grid;
       grid-template-columns: var(--mpl-metric-icon-size) var(--mpl-metric-column-width) minmax(0, 1fr);
       grid-template-rows: var(--mpl-metric-label-line) var(--mpl-metric-value-line);
@@ -172,6 +177,9 @@ export class MplMetricRow extends LitElement {
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
+    }
+    .history {
+      flex-shrink: 0;
     }
   `;
 }
