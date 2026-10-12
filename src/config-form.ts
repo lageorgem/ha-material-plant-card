@@ -53,7 +53,7 @@ const labels: Readonly<Record<string, string>> = {
   display_type: 'Display type',
   show_bars: 'Gauges',
   hide_units: 'Hide units',
-  hide_history: 'Hide 24-hour history',
+  hide_history: 'Hide history',
   history_period: 'History window',
   problem_source: 'Problem source',
   problem_sensors: 'Problem sensors',
@@ -65,7 +65,7 @@ const labels: Readonly<Record<string, string>> = {
 
 const helpers: Readonly<Record<string, string>> = {
   hide_units: 'Hides units next to values.',
-  hide_history: 'Full mode only: skips the last-24-hours range and average.',
+  hide_history: 'Full mode only: hides the history range, average and Min/Avg/Max.',
   history_period: 'Full mode. DLI is a daily total, so it always shows daily totals for the last 7 days.',
   show_bars: `Default: ${DEFAULT_GAUGES.map((key) => MEASUREMENT_LABELS[key]).join(', ')}.`,
   problem_source: "Plant monitor follows the integration's problem triggers; Gauges flags any out-of-range value.",

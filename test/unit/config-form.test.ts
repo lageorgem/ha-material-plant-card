@@ -96,7 +96,7 @@ describe('configForm', () => {
     }
     expect(configForm.computeLabel({ name: 'unknown' })).to.equal(undefined);
     expect(configForm.computeLabel(field('show_bars'))).to.equal('Gauges');
-    expect(configForm.computeLabel(field('hide_history'))).to.equal('Hide 24-hour history');
+    expect(configForm.computeLabel(field('hide_history'))).to.equal('Hide history');
     expect(configForm.computeLabel(field('history_period'))).to.equal('History window');
     expect(configForm.computeLabel(field('problem_sensors'))).to.equal('Problem sensors');
     expect(configForm.computeLabel(field('battery_warn_level'))).to.equal('Battery low below');
@@ -110,7 +110,7 @@ describe('configForm', () => {
     expect(configForm.computeHelper(field('image'))).to.equal('Overrides the plant picture.');
     expect(configForm.computeHelper(field('hide_units'))).to.equal('Hides units next to values.');
     expect(configForm.computeHelper(field('hide_history'))).to.equal(
-      'Full mode only: skips the last-24-hours range and average.',
+      'Full mode only: hides the history range, average and Min/Avg/Max.',
     );
     expect(configForm.computeHelper(field('history_period'))).to.equal(
       'Full mode. DLI is a daily total, so it always shows daily totals for the last 7 days.',
