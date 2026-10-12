@@ -7,6 +7,17 @@ import './range-bar';
 
 const formatCaption = (value: number): string => formatValue(value, '', true);
 
+/** Compact visual captions; accessible descriptions retain formatValue precision. */
+export function formatCaptionNumber(value: number): string {
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1000) return formatValue(value, '', true);
+  const digits = magnitude >= 10 ? 0 : magnitude >= 1 ? 1 : 2;
+  // Match measurements' decimal-safe rounding, including negative ties.
+  const [coefficient, exponent = '0'] = String(magnitude).split('e');
+  const shifted = Number(`${coefficient}e${Number(exponent) + digits}`);
+  return String(Math.sign(value) * Math.round(shifted) / 10 ** digits);
+}
+
 /** Accessible tile description; the enclosing button owns the accessible name. */
 export function describeWithStats(m: Measurement, stats: Stats24h | null): string {
   return describeMeasurement(m) + (stats
@@ -43,10 +54,10 @@ export class MplMetricRow extends LitElement {
         ></mpl-range-bar>
         <div class="caption">
           ${m.min !== null && m.max !== null
-            ? html`<span class="ideal">Ideal ${formatCaption(m.min)}–${formatCaption(m.max)}</span>`
+            ? html`<span class="ideal">Ideal ${formatCaptionNumber(m.min)}–${formatCaptionNumber(m.max)}</span>`
             : nothing}
           ${stats
-            ? html`<span class="history">24h ${formatCaption(stats.min)}–${formatCaption(stats.max)}</span>`
+            ? html`<span class="history">24h ${formatCaptionNumber(stats.min)}–${formatCaptionNumber(stats.max)}</span>`
             : nothing}
         </div>
       </div>
@@ -58,7 +69,7 @@ export class MplMetricRow extends LitElement {
     :host {
       --mpl-metric-icon-size: 40px;
       --mpl-metric-glyph-size: 20px;
-      --mpl-metric-column-width: 76px;
+      --mpl-metric-column-width: 80px;
       --mpl-metric-column-gap: 12px;
       --mpl-metric-label-size: 12px;
       --mpl-metric-label-line: 16px;
@@ -67,6 +78,7 @@ export class MplMetricRow extends LitElement {
       --mpl-metric-value-weight: 500;
       --mpl-metric-problem-weight: 700;
       --mpl-metric-unit-gap: 2px;
+      --mpl-metric-unit-size: 11px;
       --mpl-metric-range-gap: 2px;
       --mpl-metric-caption-size: 11px;
       --mpl-metric-caption-line: 14px;
@@ -122,6 +134,8 @@ export class MplMetricRow extends LitElement {
       grid-column: 2;
       grid-row: 2;
       min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       white-space: nowrap;
       font-size: var(--mpl-metric-value-size);
       line-height: var(--mpl-metric-value-line);
@@ -133,7 +147,7 @@ export class MplMetricRow extends LitElement {
       font-weight: var(--mpl-metric-problem-weight);
     }
     .unit {
-      font-size: var(--mpl-metric-label-size);
+      font-size: var(--mpl-metric-unit-size);
       margin-left: var(--mpl-metric-unit-gap);
       color: var(--mpl-on-surface-variant);
     }

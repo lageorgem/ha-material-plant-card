@@ -1,5 +1,5 @@
 import { expect, fixture, html } from '@open-wc/testing';
-import { describeWithStats, MplMetricRow } from '../../src/full/metric-row';
+import { describeWithStats, formatCaptionNumber, MplMetricRow } from '../../src/full/metric-row';
 import { describeMeasurement, gaugeFraction } from '../../src/calc/measurements';
 import type { GaugeTone, Measurement } from '../../src/types';
 import type { Stats24h } from '../../src/data/history-stats';
@@ -32,7 +32,7 @@ describe('mpl-metric-row', () => {
     const style = getComputedStyle(el);
     expect(style.display).to.equal('grid');
     expect(style.gridTemplateRows).to.equal('16px 24px');
-    expect(style.gridTemplateColumns.split(' ').slice(0, 2)).to.deep.equal(['40px', '76px']);
+    expect(style.gridTemplateColumns.split(' ').slice(0, 2)).to.deep.equal(['40px', '80px']);
     expect(style.columnGap).to.equal('12px');
     expect(el.getBoundingClientRect().height).to.equal(40);
     expect(element(el, '.label').textContent).to.equal('Moisture');
@@ -48,6 +48,43 @@ describe('mpl-metric-row', () => {
       value: 22, min: 2000, max: 30000, unit: 'lx' });
     expect(element(el, '.ideal').textContent).to.equal('Ideal 2k–30k');
     expect(element(el, '.value').textContent!.trim()).to.equal('22lx');
+  });
+
+  it('renders compact captions for the live moisture, DLI, and illuminance cases', async () => {
+    const el = await row({ ...moisture, min: 30, max: 85 }, { min: 53.4, max: 62.5, mean: 58 });
+    expect(element(el, '.ideal').textContent).to.equal('Ideal 30–85');
+    expect(element(el, '.history').textContent).to.equal('24h 53–63');
+    el.stats = { min: 1, max: 1.37, mean: 1.2 };
+    el.measurement = { ...moisture, min: 1500, max: 25000 };
+    await el.updateComplete;
+    expect(element(el, '.history').textContent).to.equal('24h 1–1.4');
+    expect(element(el, '.ideal').textContent).to.equal('Ideal 1.5k–25k');
+  });
+
+  it('shows both compact captions fully in a 295px row', async () => {
+    const el = await row({ ...moisture, min: 30, max: 85 }, { min: 53.4, max: 62.5, mean: 58 });
+    el.style.width = '295px';
+    el.style.fontFamily = 'Arial, sans-serif';
+    for (const selector of ['.ideal', '.history']) {
+      const caption = element(el, selector);
+      expect(caption.scrollWidth).to.be.at.most(caption.clientWidth);
+    }
+  });
+
+  it('clips long DLI units within the value column without shrinking the number', async () => {
+    const el = await row({ ...moisture, value: 0.7, unit: 'mol/d⋅m²' });
+    el.style.width = '295px';
+    el.style.fontFamily = 'Arial, sans-serif';
+    const value = element(el, '.value');
+    const style = getComputedStyle(value);
+    expect(value.textContent!.trim()).to.equal('0.7mol/d⋅m²');
+    expect(value.getBoundingClientRect().right).to.be.at.most(element(el, '.range').getBoundingClientRect().left);
+    expect(style.overflow).to.equal('hidden');
+    expect(style.whiteSpace).to.equal('nowrap');
+    expect(style.textOverflow).to.equal('ellipsis');
+    expect(style.display).not.to.equal('flex');
+    expect(style.fontSize).to.equal('20px');
+    expect(getComputedStyle(element(el, '.unit')).fontSize).to.equal('11px');
   });
 
   it('omits units when hidden or empty and shows an em dash for a null value', async () => {
@@ -141,7 +178,7 @@ describe('mpl-metric-row', () => {
     }
   });
 
-  it('ellipsizes long labels and captions without expanding the 76px column', async () => {
+  it('ellipsizes long labels and captions without expanding the 80px column', async () => {
     const wrapper = await fixture<HTMLElement>(html`
       <div style="width:287px">
         <mpl-metric-row .measurement=${{ ...moisture, label: 'A very long soil temperature measurement label' }}
@@ -151,7 +188,7 @@ describe('mpl-metric-row', () => {
     const el = wrapper.querySelector('mpl-metric-row')!;
     await el.updateComplete;
     const label = element(el, '.label');
-    expect(label.getBoundingClientRect().width).to.equal(76);
+    expect(label.getBoundingClientRect().width).to.equal(80);
     expect(label.scrollWidth).to.be.greaterThan(label.clientWidth);
     for (const selector of ['.label', '.ideal', '.history']) {
       const style = getComputedStyle(element(el, selector));
@@ -161,6 +198,19 @@ describe('mpl-metric-row', () => {
     }
     expect(el.getBoundingClientRect().height).to.equal(40);
     expect(el.scrollWidth).to.equal(el.clientWidth);
+  });
+});
+
+describe('formatCaptionNumber', () => {
+  it('uses magnitude-based precision with decimal-safe rounding and no trailing zeros', () => {
+    for (const [value, expected] of [
+      [53.4, '53'], [62.5, '63'], [1.37, '1.4'], [0.04, '0.04'],
+      [1500, '1.5k'], [30000, '30k'], [20.2, '20'], [7.2, '7.2'],
+      [1.25, '1.3'], [0.145, '0.15'], [-1.25, '-1.3'], [-62.5, '-63'],
+      [-1500, '-1.5k'], [0, '0'], [1, '1'], [0.1, '0.1'], [1e-7, '0'],
+    ] as const) {
+      expect(formatCaptionNumber(value), String(value)).to.equal(expected);
+    }
   });
 });
 
@@ -175,6 +225,9 @@ describe('describeWithStats', () => {
     );
     expect(describeWithStats(moisture, { min: 2000, max: 30000, mean: 12500 })).to.equal(
       `${describeMeasurement(moisture)} · last 24 h 2k–30k, average 13k`,
+    );
+    expect(describeWithStats(moisture, { min: 53.4, max: 62.5, mean: 58.1 })).to.equal(
+      `${describeMeasurement(moisture)} · last 24 h 53.4–62.5, average 58.1`,
     );
   });
 });
