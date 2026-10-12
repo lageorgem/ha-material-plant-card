@@ -1,0 +1,310 @@
+import { expect, fixture, html } from '@open-wc/testing';
+import sinon from 'sinon';
+import type { HomeAssistant } from 'custom-card-helpers';
+import { MaterialPlantCard } from '../../src/material-plant-card';
+import { DEFAULT_GAUGES, type MaterialPlantCardConfig, type PlantInfo } from '../../src/types';
+import { configForm } from '../../src/config-form';
+
+const ENTITY = 'plant.test';
+const BATTERY = 'sensor.battery';
+type TestState = { state: string; attributes: Record<string, unknown>; last_updated: string };
+const state = (value = 'ok', attributes: Record<string, unknown> = {}, updated = '0'): TestState =>
+  ({ state: value, attributes, last_updated: updated });
+const cfg = (overrides: Partial<MaterialPlantCardConfig> = {}): MaterialPlantCardConfig =>
+  ({ type: 'custom:material-plant-card', entity: ENTITY, ...overrides });
+const info: PlantInfo = Object.fromEntries(DEFAULT_GAUGES.map((key) => [key, {
+  min: 10, max: 50, current: 25, sensor: `sensor.${key}`, unit_of_measurement: '%',
+}]));
+function fakeHass(data: PlantInfo = info) {
+  const states: Record<string, TestState> = {
+    [ENTITY]: state('ok', { friendly_name: 'Orchid', species: 'Phalaenopsis' }),
+    [BATTERY]: state('19'),
+    ...Object.fromEntries(DEFAULT_GAUGES.map((key) => [`sensor.${key}`, state('25')])),
+  };
+  const callWS = sinon.stub().resolves({ result: data });
+  return { states, callWS };
+}
+type FakeHass = ReturnType<typeof fakeHass>;
+function assign(card: MaterialPlantCard, hass: FakeHass): void {
+  card.hass = hass as unknown as HomeAssistant;
+}
+async function settle(card: MaterialPlantCard): Promise<void> {
+  await Promise.resolve();
+  await card.updateComplete;
+  await Promise.resolve();
+  await card.updateComplete;
+}
+async function mount(config = cfg(), hass = fakeHass()): Promise<MaterialPlantCard> {
+  const card = await fixture<MaterialPlantCard>(html`<material-plant-card></material-plant-card>`);
+  card.setConfig(config);
+  assign(card, hass);
+  await settle(card);
+  return card;
+}
+const query = <T extends Element = HTMLElement>(card: MaterialPlantCard, selector: string): T =>
+  card.shadowRoot!.querySelector<T>(selector)!;
+const gauges = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAll('mpl-gauge')];
+
+describe('material-plant-card', () => {
+  afterEach(() => sinon.restore());
+
+  it('validates plant entity configuration', () => {
+    const card = new MaterialPlantCard();
+    for (const entity of ['', 'sensor.test', undefined, 7]) {
+      expect(() => card.setConfig({ ...cfg(), entity } as MaterialPlantCardConfig))
+        .to.throw('Specify a plant entity');
+    }
+    expect(() => card.setConfig(cfg())).not.to.throw();
+  });
+
+  it('shows a single missing-entity warning', async () => {
+    const hass = fakeHass();
+    delete hass.states[ENTITY];
+    const card = await mount(cfg(), hass);
+    expect(query(card, '.warning').textContent).to.equal(`Entity not available: ${ENTITY}`);
+    expect(query(card, 'ha-card').children.length).to.equal(1);
+  });
+
+  it('reads result and renders configured gauges in order, skipping absent keys', async () => {
+    const hass = fakeHass();
+    const card = await mount(cfg({ show_bars: ['temperature', 'missing', 'moisture'] }), hass);
+    expect(hass.callWS.firstCall.args).to.deep.equal([{ type: 'plant/get_info', entity_id: ENTITY }]);
+    expect(gauges(card).length).to.equal(2);
+    expect(gauges(card)[0]).to.have.property('label').that.matches(/^Temperature:/);
+    expect(gauges(card)[1]).to.have.property('label').that.matches(/^Moisture:/);
+    expect(query(card, '.gauge-btn').getAttribute('title')).to.match(/^Temperature:/);
+    card.setConfig(cfg({ show_bars: [] }));
+    await settle(card);
+    expect(gauges(card)).to.have.length(0);
+  });
+
+  it('uses explicit name, friendly name, then entity id (including empty name)', async () => {
+    const hass = fakeHass();
+    const card = await mount(cfg({ name: 'My plant' }), hass);
+    expect(query(card, '.name').textContent).to.equal('My plant');
+    card.setConfig(cfg({ name: '' }));
+    await settle(card);
+    expect(query(card, '.name').textContent).to.equal('Orchid');
+    assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state() } });
+    await settle(card);
+    expect(query(card, '.name').textContent).to.equal(ENTITY);
+  });
+
+  it('replaces species with problem text and shows badge only for problems', async () => {
+    const hass = fakeHass();
+    const card = await mount(cfg(), hass);
+    expect(query(card, '.subtitle').textContent).to.equal('Phalaenopsis');
+    expect(query(card, '.problem-badge')).to.equal(null);
+    assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('problem', {
+      species: 'Phalaenopsis', problems: [
+        { sensor_type: 'moisture', status: 'Low' },
+        { sensor_type: 'temperature', status: 'High' },
+      ],
+    }) } });
+    await settle(card);
+    expect(query(card, '.subtitle').textContent).to.equal('Moisture low · Temperature high');
+    expect(query(card, '.problem-badge')).not.to.equal(null);
+    card.setConfig(cfg({ hide_species: true }));
+    await settle(card);
+    expect(query(card, '.subtitle').textContent).to.include('Moisture low');
+    card.setConfig(cfg({ display_type: 'compact' }));
+    await settle(card);
+    expect(query(card, '.subtitle').textContent).to.include('Moisture low');
+  });
+
+  it('hides species when requested and in compact mode', async () => {
+    for (const config of [cfg({ hide_species: true }), cfg({ display_type: 'compact' })]) {
+      expect(query(await mount(config), '.subtitle')).to.equal(null);
+    }
+  });
+
+  for (const [value, tone, text] of [['80', 'ok', '80%'], ['30', 'warn', '30%'],
+    ['19', 'low', '19%'], ['unknown', 'unknown', '—']]) {
+    it(`renders ${tone} battery chip`, async () => {
+      const hass = fakeHass();
+      hass.states[BATTERY] = state(value);
+      const card = await mount(cfg({ battery_sensor: BATTERY }), hass);
+      expect(query(card, '.battery').getAttribute('data-tone')).to.equal(tone);
+      expect(query(card, '.battery').textContent!.trim()).to.equal(text);
+    });
+  }
+
+  it('hides battery without an existing entity', async () => {
+    expect(query(await mount(), '.battery')).to.equal(null);
+    expect(query(await mount(cfg({ battery_sensor: 'sensor.missing' })), '.battery')).to.equal(null);
+  });
+
+  it('uses configured battery thresholds', async () => {
+    const hass = fakeHass();
+    hass.states[BATTERY] = state('30');
+    const card = await mount(cfg({ battery_sensor: BATTERY, battery_warn_level: 35, battery_ok_level: 60 }), hass);
+    expect(query(card, '.battery').getAttribute('data-tone')).to.equal('low');
+  });
+
+  it('dispatches composed more-info for plant, battery, sensor and sensorless gauge', async () => {
+    const hass = fakeHass({ moisture: info.moisture, temperature: { min: 0, max: 40, current: 20 } });
+    const card = await mount(cfg({ battery_sensor: BATTERY, show_bars: ['moisture', 'temperature'] }), hass);
+    const events: CustomEvent<{ entityId: string }>[] = [];
+    card.addEventListener('hass-more-info', (event) => events.push(event as CustomEvent<{ entityId: string }>));
+    query(card, '.image-btn').click();
+    query(card, '.text-btn').click();
+    query(card, '.battery').click();
+    card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn').forEach((button) => button.click());
+    expect(events.map((event) => event.detail.entityId)).to.deep.equal([
+      ENTITY, ENTITY, BATTERY, 'sensor.moisture', ENTITY,
+    ]);
+    expect(events.every((event) => event.bubbles && event.composed)).to.equal(true);
+  });
+
+  it('throttles state timestamp changes with exactly one trailing call', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass();
+    const card = await mount(cfg(), hass);
+    await clock.tickAsync(1000);
+    for (const timestamp of ['1', '2']) {
+      assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, timestamp) } });
+      await settle(card);
+    }
+    expect(hass.callWS.callCount).to.equal(1);
+    await clock.tickAsync(3999);
+    expect(hass.callWS.callCount).to.equal(1);
+    await clock.tickAsync(1);
+    await settle(card);
+    expect(hass.callWS.callCount).to.equal(2);
+    card.remove();
+  });
+
+  it('ignores stale responses after switching entity', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass();
+    let resolveOld!: (response: { result: PlantInfo }) => void;
+    hass.callWS.onFirstCall().returns(new Promise((resolve) => { resolveOld = resolve; }));
+    hass.states['plant.other'] = state('ok', { friendly_name: 'Other' });
+    hass.callWS.onSecondCall().resolves({ result: { temperature: info.temperature } });
+    const card = await mount(cfg(), hass);
+    card.setConfig(cfg({ entity: 'plant.other' }));
+    await clock.tickAsync(5000);
+    await settle(card);
+    resolveOld({ result: info });
+    await settle(card);
+    expect(gauges(card)).to.have.length(1);
+    expect(gauges(card)[0]).to.have.property('label').that.matches(/^Temperature:/);
+    card.remove();
+  });
+
+  it('keeps last good info when a later request fails, including synchronous throws', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass();
+    const card = await mount(cfg(), hass);
+    hass.callWS.onSecondCall().rejects(new Error('offline'));
+    await clock.tickAsync(5000);
+    assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, '1') } });
+    await settle(card);
+    expect(gauges(card)).to.have.length(6);
+    hass.callWS.onThirdCall().throws(new Error('offline'));
+    await clock.tickAsync(5000);
+    expect(() => assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, '2') } })).not.to.throw();
+    await settle(card);
+    expect(gauges(card)).to.have.length(6);
+    card.remove();
+  });
+
+  it('exposes sizing, grid, form and first-plant stub defaults', async () => {
+    const card = await mount();
+    expect(card.getCardSize()).to.equal(4);
+    card.setConfig(cfg({ display_type: 'compact' }));
+    expect(card.getCardSize()).to.equal(3);
+    expect(card.getGridOptions()).to.deep.equal({ columns: 6, min_columns: 4, rows: 'auto' });
+    expect(MaterialPlantCard.getConfigForm()).to.equal(configForm);
+    expect(MaterialPlantCard.getStubConfig({ states: { 'light.first': state(), 'plant.first': state(), 'plant.second': state() } } as unknown as HomeAssistant))
+      .to.deep.equal({ type: 'custom:material-plant-card', entity: 'plant.first', show_bars: [...DEFAULT_GAUGES] });
+    expect(MaterialPlantCard.getStubConfig({ states: {} } as HomeAssistant).entity).to.equal('plant.my_plant');
+  });
+
+  it('hides gauge values in compact by default, with explicit override', async () => {
+    const card = await mount(cfg({ display_type: 'compact' }));
+    expect(gauges(card)[0]).to.have.property('value', '');
+    card.setConfig(cfg({ display_type: 'compact', hide_units: false }));
+    await settle(card);
+    expect(gauges(card)[0]).to.have.property('value', '25%');
+  });
+
+  it('falls back to masked placeholder on image error and retries a new source', async () => {
+    const card = await mount(cfg({ image: '/first.jpg' }));
+    query(card, 'img').dispatchEvent(new Event('error'));
+    await settle(card);
+    expect(query(card, 'img')).to.equal(null);
+    expect(query(card, '.placeholder')).not.to.equal(null);
+    card.setConfig(cfg({ image: '/second.jpg' }));
+    await settle(card);
+    expect(query(card, 'img').getAttribute('src')).to.equal('/second.jpg');
+    card.setConfig(cfg({ hide_image: true }));
+    await settle(card);
+    expect(query(card, '.image-btn')).to.equal(null);
+  });
+
+  it('uses entity picture without rewriting relative paths, with config override', async () => {
+    const hass = fakeHass();
+    hass.states[ENTITY] = state('ok', { entity_picture: '/api/plant.jpg' });
+    const card = await mount(cfg(), hass);
+    expect(query(card, 'img').getAttribute('src')).to.equal('/api/plant.jpg');
+    card.setConfig(cfg({ image: '/override.jpg' }));
+    await settle(card);
+    expect(query(card, 'img').getAttribute('src')).to.equal('/override.jpg');
+  });
+
+  it('uses live sensor values without refetching unchanged plant timestamps', async () => {
+    const hass = fakeHass();
+    const card = await mount(cfg(), hass);
+    assign(card, { ...hass, states: { ...hass.states, 'sensor.moisture': state('13') } });
+    await settle(card);
+    expect(gauges(card)[0]).to.have.property('value', '13%');
+    expect(gauges(card)[0]).to.have.property('tone', 'advisory');
+    expect(hass.callWS.callCount).to.equal(1);
+    expect(query(card, '.problem-badge')).to.equal(null);
+  });
+
+  it('cancels the trailing request when disconnected', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass();
+    const card = await mount(cfg(), hass);
+    assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, '1') } });
+    card.remove();
+    await clock.tickAsync(5000);
+    expect(hass.callWS.callCount).to.equal(1);
+  });
+
+  it('ignores unrelated entity changes but renders tracked plant, battery and sensor changes', async () => {
+    let hass = fakeHass();
+    const card = await mount(cfg({ battery_sensor: BATTERY }), hass);
+    const updated = sinon.spy();
+    card.addController({ hostUpdated: updated });
+    hass = { ...hass, states: { ...hass.states, 'light.other': state('on') } };
+    assign(card, hass);
+    await settle(card);
+    expect(updated.callCount).to.equal(0);
+    for (const id of [ENTITY, BATTERY, 'sensor.moisture']) {
+      hass = { ...hass, states: { ...hass.states, [id]: { ...hass.states[id] } } };
+      assign(card, hass);
+      await settle(card);
+    }
+    expect(updated.callCount).to.equal(3);
+  });
+
+  it('fits six real gauges in one row at 327px and is at most 170px tall', async () => {
+    const container = await fixture<HTMLDivElement>(html`<div style="width:327px"><material-plant-card></material-plant-card></div>`);
+    const card = container.firstElementChild as MaterialPlantCard;
+    card.setConfig(cfg());
+    assign(card, fakeHass());
+    await settle(card);
+    for (const gauge of gauges(card)) {
+      await (gauge as HTMLElement & { updateComplete: Promise<boolean> }).updateComplete;
+    }
+    const surface = query(card, 'ha-card');
+    expect(gauges(card)).to.have.length(6);
+    expect(surface.offsetHeight).to.be.greaterThan(100);
+    expect(surface.offsetHeight).to.be.at.most(170);
+    const tops = gauges(card).map((gauge) => gauge.getBoundingClientRect().top);
+    expect(Math.max(...tops) - Math.min(...tops)).to.be.lessThan(1);
+  });
+});
