@@ -232,15 +232,11 @@ describe('activeProblems', () => {
 });
 
 describe('batteryInfo', () => {
-  it('matches icon and tone boundaries', () => {
-    for (const [level, icon, tone] of [
-      [0, 'mdi:battery-outline', 'low'], [5, 'mdi:battery-outline', 'low'],
-      [6, 'mdi:battery-10', 'low'], [19, 'mdi:battery-20', 'low'],
-      [20, 'mdi:battery-20', 'warn'], [39, 'mdi:battery-40', 'warn'],
-      [40, 'mdi:battery-40', 'ok'], [94, 'mdi:battery-90', 'ok'],
-      [95, 'mdi:battery', 'ok'], [100, 'mdi:battery', 'ok'],
+  it('returns only level and tone with a default low threshold of 10', () => {
+    for (const [level, tone] of [
+      [0, 'low'], [9, 'low'], [10, 'ok'], [100, 'ok'],
     ] as const) {
-      expect(batteryInfo({ state: String(level) })).to.deep.equal({ level, icon, tone });
+      expect(batteryInfo({ state: String(level) })).to.deep.equal({ level, tone });
     }
   });
 
@@ -249,13 +245,20 @@ describe('batteryInfo', () => {
     expect(batteryInfo({ state: '-10' }).level).to.equal(0);
     expect(batteryInfo({ state: '120' }).level).to.equal(100);
     for (const state of [undefined, { state: 'unavailable' }, { state: 'unknown' }, { state: '' }]) {
-      expect(batteryInfo(state)).to.deep.equal({ level: null, icon: 'mdi:battery-unknown', tone: 'unknown' });
+      expect(batteryInfo(state)).to.deep.equal({ level: null, tone: 'unknown' });
     }
   });
 
-  it('uses custom inclusive warning and okay thresholds', () => {
-    for (const [level, tone] of [[9, 'low'], [10, 'warn'], [29, 'warn'], [30, 'ok']] as const) {
-      expect(batteryInfo({ state: String(level) }, 10, 30).tone).to.equal(tone);
+  it('uses a custom exclusive low threshold', () => {
+    for (const [level, tone] of [[19, 'low'], [20, 'ok']] as const) {
+      expect(batteryInfo({ state: String(level) }, 20)).to.deep.equal({ level, tone });
+    }
+  });
+
+  it('defaults undefined and non-finite thresholds to 10', () => {
+    for (const warn of [undefined, NaN, Infinity, -Infinity]) {
+      expect(batteryInfo({ state: '9' }, warn)).to.deep.equal({ level: 9, tone: 'low' });
+      expect(batteryInfo({ state: '10' }, warn)).to.deep.equal({ level: 10, tone: 'ok' });
     }
   });
 });

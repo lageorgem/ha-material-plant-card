@@ -58,8 +58,7 @@ const labels: Readonly<Record<string, string>> = {
   hide_species: 'Hide species',
   hide_image: 'Hide image',
   image: 'Image',
-  battery_warn_level: 'Battery warning below',
-  battery_ok_level: 'Battery OK from',
+  battery_warn_level: 'Battery low below',
 };
 
 const helpers: Readonly<Record<string, string>> = {
@@ -67,6 +66,7 @@ const helpers: Readonly<Record<string, string>> = {
   problem_source: "Plant monitor follows the integration's problem triggers; Gauges flags any out-of-range value.",
   problem_sensors: 'Leave empty to allow every sensor.',
   image: 'Overrides the plant picture.',
+  battery_warn_level: 'Battery turns red below this level (default 10%).',
 };
 
 const schema: HaFormSchema[] = [
@@ -107,9 +107,7 @@ const schema: HaFormSchema[] = [
       { name: 'hide_species', selector: { boolean: {} } },
       { name: 'hide_image', selector: { boolean: {} } },
       { name: 'image', selector: { text: {} } },
-      { type: 'grid', name: '', schema: [
-        batteryLevel('battery_warn_level'), batteryLevel('battery_ok_level'),
-      ] },
+      batteryLevel('battery_warn_level'),
     ],
   },
 ];

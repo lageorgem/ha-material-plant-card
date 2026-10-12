@@ -130,11 +130,10 @@ export function activeProblems(
   return problems;
 }
 
-export function batteryInfo(state: { state: string } | undefined, warn = 20, ok = 40): BatteryInfo {
+export function batteryInfo(state: { state: string } | undefined, warn = 10): BatteryInfo {
   const value = toNumber(state?.state);
   const level = value === null ? null : Math.max(0, Math.min(100, Math.round(value)));
-  const icon = level === null ? 'mdi:battery-unknown' : level >= 95 ? 'mdi:battery'
-    : level <= 5 ? 'mdi:battery-outline' : `mdi:battery-${Math.round(level / 10) * 10}`;
-  const tone = level === null ? 'unknown' : level >= ok ? 'ok' : level >= warn ? 'warn' : 'low';
-  return { level, icon, tone };
+  const threshold = Number.isFinite(warn) ? warn : 10;
+  const tone = level === null ? 'unknown' : level < threshold ? 'low' : 'ok';
+  return { level, tone };
 }

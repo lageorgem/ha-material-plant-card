@@ -21,7 +21,7 @@ describe('configForm', () => {
   it('exposes every editable config key exactly once, excluding compatibility keys', () => {
     expect(fields().map((item) => item.name).sort()).to.deep.equal([
       'entity', 'name', 'display_type', 'show_bars', 'hide_species', 'hide_image',
-      'hide_units', 'image', 'battery_sensor', 'battery_warn_level', 'battery_ok_level',
+      'hide_units', 'image', 'battery_sensor', 'battery_warn_level',
       'problem_source', 'problem_sensors',
     ].sort());
   });
@@ -43,7 +43,7 @@ describe('configForm', () => {
     });
   });
 
-  it('groups flat config values in expandable sections and a battery grid', () => {
+  it('groups flat config values in expandable sections with one battery threshold', () => {
     const sections = configForm.schema.filter((item) => item.type === 'expandable');
     expect(sections.map(({ name, title, icon, flatten: flat }) => ({ name, title, icon, flat })))
       .to.deep.equal([
@@ -51,16 +51,12 @@ describe('configForm', () => {
         { name: '', title: 'Problems', icon: 'mdi:alert-circle-outline', flat: true },
         { name: '', title: 'Appearance', icon: 'mdi:palette-outline', flat: true },
       ]);
-    const grid = sections[2].schema?.find((item) => item.type === 'grid');
-    expect(grid?.name).to.equal('');
-    expect(grid?.schema?.map((item) => item.name)).to.deep.equal([
-      'battery_warn_level', 'battery_ok_level',
-    ]);
-    for (const name of ['battery_warn_level', 'battery_ok_level']) {
-      expect(field(name).selector).to.deep.equal({
-        number: { min: 0, max: 100, step: 1, mode: 'box', unit_of_measurement: '%' },
-      });
-    }
+    expect(sections[2].schema?.find((item) => item.name === 'battery_warn_level'))
+      .to.equal(field('battery_warn_level'));
+    expect(field('battery_warn_level').selector).to.deep.equal({
+      number: { min: 0, max: 100, step: 1, mode: 'box', unit_of_measurement: '%' },
+    });
+    expect(fields().some((item) => item.name === 'battery_ok_level')).to.equal(false);
   });
 
   it('uses text, boolean and display/problem mode selectors', () => {
@@ -88,8 +84,7 @@ describe('configForm', () => {
     expect(configForm.computeLabel({ name: 'unknown' })).to.equal(undefined);
     expect(configForm.computeLabel(field('show_bars'))).to.equal('Gauges');
     expect(configForm.computeLabel(field('problem_sensors'))).to.equal('Problem sensors');
-    expect(configForm.computeLabel(field('battery_warn_level'))).to.equal('Battery warning below');
-    expect(configForm.computeLabel(field('battery_ok_level'))).to.equal('Battery OK from');
+    expect(configForm.computeLabel(field('battery_warn_level'))).to.equal('Battery low below');
   });
 
   it('explains problem filtering, picture overrides and default gauges', () => {
@@ -98,6 +93,9 @@ describe('configForm', () => {
     );
     expect(configForm.computeHelper(field('problem_sensors'))).to.equal('Leave empty to allow every sensor.');
     expect(configForm.computeHelper(field('image'))).to.equal('Overrides the plant picture.');
+    expect(configForm.computeHelper(field('battery_warn_level'))).to.equal(
+      'Battery turns red below this level (default 10%).',
+    );
     expect(configForm.computeHelper(field('show_bars'))).to.equal(
       `Default: ${DEFAULT_GAUGES.map((key) => MEASUREMENT_LABELS[key]).join(', ')}.`,
     );

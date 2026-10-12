@@ -32,11 +32,12 @@ export interface MaterialPlantCardConfig {
   hide_units?: boolean;
   image?: string;
   battery_sensor?: string;
+  // Battery turns red below this level; defaults to 10.
   battery_warn_level?: number;
-  battery_ok_level?: number;
   problem_source?: 'plant' | 'gauges';
   problem_sensors?: string[];
   // Accepted for flower-card configuration compatibility; ignored by this card.
+  battery_ok_level?: number;
   bars_per_row?: number;
   show_care?: string[];
   extra_badges?: unknown[];
@@ -72,6 +73,5 @@ export interface Problem {
 }
 export interface BatteryInfo {
   level: number | null;
-  icon: string;
-  tone: 'ok' | 'warn' | 'low' | 'unknown';
+  tone: 'ok' | 'low' | 'unknown';
 }
