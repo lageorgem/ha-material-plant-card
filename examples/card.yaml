@@ -1,0 +1,32 @@
+# Full-options example. Replace entity IDs and the image path with your own.
+# Configure sensor min/max thresholds in the plant monitor integration.
+# Options: https://github.com/lageorgem/ha-material-plant-card#card-options
+# Changes: https://github.com/lageorgem/ha-material-plant-card/blob/master/CHANGELOG.md
+type: custom:material-plant-card
+entity: plant.orhideea
+name: Orchid
+display_type: full
+show_bars:
+  - moisture
+  - conductivity
+  - temperature
+  - illuminance
+  - humidity
+  - dli
+hide_species: false
+hide_image: false
+# true hides the entire value text below gauges, not just units.
+hide_units: false
+image: /local/plants/orchid.jpg
+battery_sensor: sensor.sh_5_battery
+battery_warn_level: 20
+battery_ok_level: 40
+problem_source: plant
+# Empty/omitted allows all measurements; this example selects two.
+problem_sensors:
+  - moisture
+  - dli
+# Compatibility-only keys: accepted and ignored.
+bars_per_row: 6
+show_care: []
+extra_badges: []
