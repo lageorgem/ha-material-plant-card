@@ -48,6 +48,7 @@ export class MaterialPlantCard extends LitElement {
   private _timer?: ReturnType<typeof setTimeout>;
   private _pending = false;
   @state() private _tooltip?: HTMLButtonElement;
+  @state() private _tooltipSource?: 'mouse' | 'touch' | 'focus';
   private _tooltipShowTimer?: ReturnType<typeof setTimeout>;
   private _tooltipHideTimer?: ReturnType<typeof setTimeout>;
   private _press?: { button: HTMLButtonElement; id: number; x: number; y: number; long: boolean };
@@ -64,12 +65,13 @@ export class MaterialPlantCard extends LitElement {
     this._suppressClick = undefined;
   }
 
-  private _showTooltip(button: HTMLButtonElement, touch = false): void {
+  private _showTooltip(button: HTMLButtonElement, source: 'mouse' | 'touch' | 'focus'): void {
     clearTimeout(this._tooltipHideTimer);
     this._tooltipHideTimer = undefined;
     this._tooltip = button;
-    this._touchTooltip = touch;
-    if (touch) document.addEventListener('pointerdown', this._dismissTooltip, true);
+    this._tooltipSource = source;
+    this._touchTooltip = source === 'touch';
+    if (this._touchTooltip) document.addEventListener('pointerdown', this._dismissTooltip, true);
   }
 
   private _hideTooltip = (): void => {
@@ -78,6 +80,7 @@ export class MaterialPlantCard extends LitElement {
     this._tooltipShowTimer = undefined;
     this._tooltipHideTimer = undefined;
     this._tooltip = undefined;
+    this._tooltipSource = undefined;
     this._hoveredGauge = undefined;
     this._tooltipHovered = false;
     this._focusedGauge = undefined;
@@ -106,7 +109,7 @@ export class MaterialPlantCard extends LitElement {
       this._tooltipShowTimer = undefined;
       press.long = true;
       this._suppressClick = { button, id: press.id, released: false };
-      this._showTooltip(button, true);
+      this._showTooltip(button, 'touch');
     }, 450);
   }
 
@@ -145,7 +148,7 @@ export class MaterialPlantCard extends LitElement {
     this._hoveredGauge = button;
     this._tooltipShowTimer = setTimeout(() => {
       this._tooltipShowTimer = undefined;
-      this._showTooltip(button);
+      this._showTooltip(button, 'mouse');
     }, 500);
   }
 
@@ -187,7 +190,7 @@ export class MaterialPlantCard extends LitElement {
     if (!button.matches(':focus-visible')) return;
     if (this._tooltip !== button) this._dismissTooltip();
     this._focusedGauge = button;
-    this._showTooltip(button);
+    this._showTooltip(button, 'focus');
   }
 
   private _gaugeClick(event: MouseEvent, entity: string): void {
@@ -345,7 +348,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   protected shouldUpdate(changed: PropertyValues): boolean {
-    if (changed.has('_tooltip') || changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugeCapacity')) return true;
+    if (changed.has('_tooltip') || changed.has('_tooltipSource') || changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugeCapacity')) return true;
     if (!this._config || !this.hass || !changed.has('hass')) return false;
     const old = changed.get('hass') as HomeAssistant | undefined;
     if (!old) return true;
@@ -427,7 +430,7 @@ export class MaterialPlantCard extends LitElement {
             <mpl-gauge .embedded=${true} .fraction=${m.fraction} .tone=${toneFor(m, problems)} .icon=${m.icon}
               .value=${hideUnits ? '' : formatValue(m.value, m.unit, hideUnits)} .label=${describeMeasurement(m)}></mpl-gauge>
           </button>`)}</div>` : nothing}
-        ${this._tooltip && tooltipText ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip"
+        ${this._tooltip && tooltipText ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip" data-source=${this._tooltipSource}
           @pointerenter=${this._tooltipPointerEnter} @pointerleave=${this._tooltipPointerLeave}>
           <span class="tooltip-title">${tooltipText[0]}</span>
           <span class="tooltip-body">${tooltipText[1]}</span>
@@ -438,7 +441,8 @@ export class MaterialPlantCard extends LitElement {
   static styles = [themeTokens, css`
     :host { display: block; }
     ha-card { position: relative; display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
-    .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: auto; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
+    .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
+    .tooltip[data-source='mouse'] { pointer-events: auto; }
     .tooltip-title, .tooltip-body { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .tooltip-title { font-weight: 500; }
     @keyframes tooltip-enter { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: scale(1); } }

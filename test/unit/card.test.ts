@@ -155,6 +155,43 @@ describe('material-plant-card', () => {
       });
     }
 
+    it('lets the first header tap through a persistent touch tooltip', async () => {
+      const card = await mount();
+      card.style.width = '327px';
+      await settleLayout(card);
+      const clock = clockForTooltip();
+      const moreInfo = sinon.spy();
+      card.addEventListener('hass-more-info', moreInfo);
+      const button = query(card, '.gauge-btn');
+      pointer(button, 'pointerdown');
+      await clock.tickAsync(450);
+      pointer(button, 'pointerup');
+      await settle(card);
+      const tooltip = query(card, '.tooltip');
+      expect(getComputedStyle(tooltip).pointerEvents).to.equal('none');
+      const name = query<HTMLButtonElement>(card, '.name');
+      const bounds = name.getBoundingClientRect();
+      const surface = query(card, 'ha-card');
+      const surfaceBounds = surface.getBoundingClientRect();
+      // Force the reported overlap independently of font and header dimensions.
+      tooltip.style.animation = 'none';
+      tooltip.style.left = `${bounds.left - surfaceBounds.left - surface.clientLeft}px`;
+      tooltip.style.top = `${bounds.top - surfaceBounds.top - surface.clientTop}px`;
+      tooltip.style.width = `${bounds.width}px`;
+      tooltip.style.height = `${bounds.height}px`;
+      const x = bounds.left + bounds.width / 2;
+      const y = bounds.top + bounds.height / 2;
+      const target = card.shadowRoot!.elementFromPoint(x, y)!;
+      expect(target).to.equal(name);
+      pointer(target, 'pointerdown', 'touch', x, y);
+      target.dispatchEvent(new PointerEvent('click', { pointerType: 'touch', pointerId: 1, detail: 1, bubbles: true, composed: true }));
+      expect(moreInfo.calledOnce).to.equal(true);
+      expect(moreInfo.firstCall.args[0].detail.entityId).to.equal(ENTITY);
+      await settle(card);
+      expect(query(card, '.tooltip')).to.equal(null);
+      card.remove();
+    });
+
     for (const dismissal of ['cancel', 'keydown', 'keyboard-click', 'timeout', 'other-pointer', 'suppressed'] as const) {
       it(`scopes long-press suppression: ${dismissal}`, async () => {
         const card = await mount();
@@ -232,6 +269,7 @@ describe('material-plant-card', () => {
       await clock.tickAsync(150);
       await settle(card);
       expect(query(card, '.tooltip')).not.to.equal(null);
+      expect(getComputedStyle(query(card, '.tooltip')).pointerEvents).to.equal('none');
       button.blur();
       await settle(card);
       expect(query(card, '.tooltip')).to.equal(null);
@@ -331,6 +369,7 @@ describe('material-plant-card', () => {
       sinon.stub(button, 'matches').withArgs(':focus-visible').returns(true);
       button.focus();
       await settle(card);
+      expect(getComputedStyle(query(card, '.tooltip')).pointerEvents).to.equal('none');
       expect(query(card, '.tooltip-title').textContent).to.equal('Moisture');
       expect(query(card, '.tooltip-body').textContent).to.equal('25 % · ideal 10–50 %');
       button.blur();
