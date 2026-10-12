@@ -21,6 +21,8 @@ export const themeTokens = css`
     --mpl-surface-container-high: var(--md-sys-color-surface-container-high, color-mix(in srgb, var(--mpl-on-surface) 11%, var(--mpl-surface-bg)));
     --mpl-surface-container-highest: var(--md-sys-color-surface-container-highest, color-mix(in srgb, var(--mpl-on-surface) 14%, var(--mpl-surface-bg)));
     --mpl-on-surface: var(--md-sys-color-on-surface, var(--primary-text-color, #1c1b1f));
+    --mpl-inverse-surface: var(--md-sys-color-inverse-surface, #313033);
+    --mpl-inverse-on-surface: var(--md-sys-color-inverse-on-surface, #f4eff4);
     --mpl-on-surface-variant: var(--md-sys-color-on-surface-variant, var(--secondary-text-color, #49454f));
     --mpl-outline: var(--md-sys-color-outline, var(--divider-color, #79747e));
     --mpl-outline-variant: var(--md-sys-color-outline-variant, var(--divider-color, #cac4d0));

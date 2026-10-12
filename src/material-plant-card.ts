@@ -47,6 +47,110 @@ export class MaterialPlantCard extends LitElement {
   private _inFlight?: number;
   private _timer?: ReturnType<typeof setTimeout>;
   private _pending = false;
+  @state() private _tooltip?: HTMLButtonElement;
+  private _tooltipShowTimer?: ReturnType<typeof setTimeout>;
+  private _tooltipHideTimer?: ReturnType<typeof setTimeout>;
+  private _press?: { button: HTMLButtonElement; id: number; x: number; y: number; long: boolean };
+  private _suppressClick?: HTMLButtonElement;
+
+  private _hideTooltip = (): void => {
+    clearTimeout(this._tooltipShowTimer);
+    clearTimeout(this._tooltipHideTimer);
+    this._tooltipShowTimer = undefined;
+    this._tooltipHideTimer = undefined;
+    this._tooltip = undefined;
+  };
+
+  private _dismissTooltip = (): void => {
+    this._hideTooltip();
+    this._press = undefined;
+  };
+
+  private _tooltipKeydown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') this._dismissTooltip();
+  };
+
+  private _gaugePointerDown(event: PointerEvent): void {
+    this._dismissTooltip();
+    this._suppressClick = undefined;
+    if (event.pointerType !== 'touch' && event.pointerType !== 'pen') return;
+    const button = event.currentTarget as HTMLButtonElement;
+    const press = { button, id: event.pointerId, x: event.clientX, y: event.clientY, long: false };
+    this._press = press;
+    this._tooltipShowTimer = setTimeout(() => {
+      this._tooltipShowTimer = undefined;
+      press.long = true;
+      this._suppressClick = button;
+      this._tooltip = button;
+    }, 450);
+  }
+
+  private _gaugePointerMove = (event: PointerEvent): void => {
+    const press = this._press;
+    if (press && event.pointerId === press.id && Math.hypot(event.clientX - press.x, event.clientY - press.y) > 8) this._dismissTooltip();
+  };
+
+  private _gaugePointerUp = (event: PointerEvent): void => {
+    const press = this._press;
+    if (!press || event.pointerId !== press.id) return;
+    clearTimeout(this._tooltipShowTimer);
+    this._tooltipShowTimer = undefined;
+    this._press = undefined;
+    if (press.long) this._tooltipHideTimer = setTimeout(this._hideTooltip, 1500);
+  };
+
+  private _gaugePointerCancel = (event: PointerEvent): void => {
+    if (event.pointerId === this._press?.id) this._dismissTooltip();
+  };
+
+  private _gaugePointerEnter(event: PointerEvent): void {
+    if (event.pointerType !== 'mouse') return;
+    this._dismissTooltip();
+    const button = event.currentTarget as HTMLButtonElement;
+    this._tooltipShowTimer = setTimeout(() => {
+      this._tooltipShowTimer = undefined;
+      this._tooltip = button;
+    }, 500);
+  }
+
+  private _gaugePointerLeave(event: PointerEvent): void {
+    if (event.pointerType === 'mouse') this._hideTooltip();
+  }
+
+  private _gaugeFocus(event: FocusEvent): void {
+    const button = event.currentTarget as HTMLButtonElement;
+    if (!button.matches(':focus-visible')) return;
+    this._dismissTooltip();
+    this._tooltip = button;
+  }
+
+  private _gaugeClick(event: MouseEvent, entity: string): void {
+    if (event.currentTarget === this._suppressClick) {
+      this._suppressClick = undefined;
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
+    this._moreInfo(entity);
+  }
+
+  protected updated(): void {
+    const tooltip = this.shadowRoot?.querySelector<HTMLElement>('.tooltip');
+    const surface = this.shadowRoot?.querySelector<HTMLElement>('ha-card');
+    const button = this._tooltip;
+    if (!tooltip || !surface || !button) return;
+    if (!button.isConnected) { this._dismissTooltip(); return; }
+    const bounds = surface.getBoundingClientRect();
+    const target = button.getBoundingClientRect();
+    // Computed dimensions retain subpixels and are unaffected by the enter scale.
+    const tooltipStyle = getComputedStyle(tooltip);
+    const width = parseFloat(tooltipStyle.width);
+    const height = parseFloat(tooltipStyle.height);
+    const centre = target.left + target.width / 2 - bounds.left - surface.clientLeft;
+    const left = Math.max(8, Math.min(centre - width / 2, surface.clientWidth - 8 - width));
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${target.top - bounds.top - surface.clientTop - height - 4}px`;
+  }
 
   public setConfig(config: MaterialPlantCardConfig): void {
     if (!config || typeof config.entity !== 'string' || !config.entity.startsWith('plant.')) {
@@ -54,6 +158,7 @@ export class MaterialPlantCard extends LitElement {
     }
     const changedEntity = this._config?.entity !== config.entity;
     this._config = { ...config, show_bars: config.show_bars ? [...config.show_bars] : undefined };
+    this._dismissTooltip();
     if (changedEntity) {
       this._info = undefined;
       // Invalidate the old entity even when hass has not arrived yet.
@@ -117,9 +222,23 @@ export class MaterialPlantCard extends LitElement {
     super.connectedCallback();
     if (this._pending) this._queueFetch();
     this._observeGauges();
+    window.addEventListener('pointermove', this._gaugePointerMove, true);
+    window.addEventListener('pointerup', this._gaugePointerUp, true);
+    window.addEventListener('pointercancel', this._gaugePointerCancel, true);
+    window.addEventListener('scroll', this._dismissTooltip, true);
+    this.addEventListener('scroll', this._dismissTooltip, true);
+    window.addEventListener('keydown', this._tooltipKeydown, true);
   }
   public disconnectedCallback(): void {
     super.disconnectedCallback();
+    this._dismissTooltip();
+    this._suppressClick = undefined;
+    window.removeEventListener('pointermove', this._gaugePointerMove, true);
+    window.removeEventListener('pointerup', this._gaugePointerUp, true);
+    window.removeEventListener('pointercancel', this._gaugePointerCancel, true);
+    window.removeEventListener('scroll', this._dismissTooltip, true);
+    this.removeEventListener('scroll', this._dismissTooltip, true);
+    window.removeEventListener('keydown', this._tooltipKeydown, true);
     this._gaugesObserver?.disconnect();
     this._gaugesObserver = undefined;
     if (this._gaugesFrame !== undefined) cancelAnimationFrame(this._gaugesFrame);
@@ -153,7 +272,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   protected shouldUpdate(changed: PropertyValues): boolean {
-    if (changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugeCapacity')) return true;
+    if (changed.has('_tooltip') || changed.has('_config') || changed.has('_info') || changed.has('_failedSrc') || changed.has('_gaugeCapacity')) return true;
     if (!this._config || !this.hass || !changed.has('hass')) return false;
     const old = changed.get('hass') as HomeAssistant | undefined;
     if (!old) return true;
@@ -181,6 +300,8 @@ export class MaterialPlantCard extends LitElement {
     const compact = cfg.display_type === 'compact';
     const hideUnits = cfg.hide_units ?? compact;
     const measurements = buildMeasurements(this._info, cfg.show_bars ?? DEFAULT_GAUGES, this.hass.states);
+    const tooltipIndex = this._tooltip ? Array.from(this.shadowRoot!.querySelectorAll('.gauge-btn')).indexOf(this._tooltip) : -1;
+    const tooltipMeasurement = measurements[tooltipIndex];
     const n = measurements.length;
     const rows = Math.ceil(n / this._gaugeCapacity);
     const columns = n ? Math.ceil(n / rows) : 1;
@@ -223,17 +344,26 @@ export class MaterialPlantCard extends LitElement {
               <mpl-battery .level=${battery.level} .tone=${battery.tone}></mpl-battery>
             </button>` : nothing}
         </div>
-        ${measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
-          <button class="gauge-btn" type="button" title=${describeMeasurement(m)} aria-label=${describeMeasurement(m)} @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}>
+        ${measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m, index) => html`
+          <button class="gauge-btn" type="button" aria-label=${describeMeasurement(m)}
+            aria-describedby=${this._tooltip && this._tooltip === this.shadowRoot?.querySelectorAll('.gauge-btn')[index] ? 'mpl-tooltip' : nothing}
+            @pointerdown=${this._gaugePointerDown} @pointerenter=${this._gaugePointerEnter} @pointerleave=${this._gaugePointerLeave}
+            @focus=${this._gaugeFocus} @blur=${this._hideTooltip}
+            @contextmenu=${(event: Event) => event.preventDefault()}
+            @click=${(event: MouseEvent) => this._gaugeClick(event, m.sensor ?? cfg.entity)}>
             <mpl-gauge .embedded=${true} .fraction=${m.fraction} .tone=${toneFor(m, problems)} .icon=${m.icon}
               .value=${hideUnits ? '' : formatValue(m.value, m.unit, hideUnits)} .label=${describeMeasurement(m)}></mpl-gauge>
           </button>`)}</div>` : nothing}
+        ${this._tooltip && tooltipMeasurement ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip">${describeMeasurement(tooltipMeasurement)}</div>` : nothing}
       </ha-card>`;
   }
 
   static styles = [themeTokens, css`
     :host { display: block; }
-    ha-card { display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
+    ha-card { position: relative; display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
+    .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: min(220px, calc(100% - 16px)); width: max-content; white-space: normal; overflow-wrap: anywhere; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
+    @keyframes tooltip-enter { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: scale(1); } }
+    @media (prefers-reduced-motion: reduce) { .tooltip { animation: none; } }
     .header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
     .header.no-image { grid-template-columns: minmax(0, 1fr) auto; }
     button { appearance: none; border: 0; margin: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
@@ -254,6 +384,7 @@ export class MaterialPlantCard extends LitElement {
     .gauges { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px; margin-top: 12px; }
     .gauge-btn { flex: 0 0 calc((100% - (var(--mpl-cols) - 1) * 4px) / var(--mpl-cols)); display: grid; justify-items: center; min-width: 0; min-height: 44px; border-radius: 12px; }
     .gauge-btn:hover, .text-btn:hover, .battery:hover { background: color-mix(in srgb, var(--mpl-on-surface) 8%, transparent); }
+    .gauge-btn { -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
     .gauge-btn:active, .text-btn:active { background: color-mix(in srgb, var(--mpl-on-surface) 12%, transparent); }
     .compact .image-btn { width: 40px; height: 40px; }
     .compact .gauges { margin-top: 8px; }
