@@ -125,6 +125,23 @@ describe('measurement presentation', () => {
     expect(formatValue(null, '', true)).to.equal('—');
   });
 
+  it('rounds decimal ties half-up in every branch, including negative values', () => {
+    for (const [value, unit, expected] of [
+      [1450, 'lx', '1.5k'], [1.005, '', '1.01'], [0.705, '', '0.71'],
+      [57.15, '%', '57.2%'], [-2.5, '°C', '-2.5°'],
+      [-1.005, '', '-1.01'], [-57.15, '%', '-57.2%'],
+      [-100.5, '', '-101'], [-10500, 'lx', '-11k'],
+      [1e-7, '', '0'],
+    ] as const) {
+      expect(formatValue(value, unit), String(value)).to.equal(expected);
+    }
+  });
+
+  it('keeps the original magnitude branch when rounding crosses a boundary', () => {
+    expect(formatValue(9.996, '')).to.equal('10');
+    expect(formatValue(999.6, 'lx')).to.equal('1000');
+  });
+
   it('describes raw numbers, missing values/ranges, and empty units', () => {
     expect(describeMeasurement(measurement())).to.equal('Moisture: 13 % (15–65 %)');
     expect(describeMeasurement(measurement({ value: null }))).to.equal('Moisture: — % (15–65 %)');

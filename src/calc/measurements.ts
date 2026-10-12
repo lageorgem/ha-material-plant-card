@@ -63,14 +63,21 @@ export function buildMeasurements(
   return measurements;
 }
 
+function roundDecimal(value: number, digits: number): number {
+  // Shift the decimal exponent instead of multiplying binary floats; ties round away from zero.
+  const [coefficient, exponent = '0'] = String(Math.abs(value)).split('e');
+  const shifted = Number(`${coefficient}e${Number(exponent) + digits}`);
+  return Math.sign(value) * Math.round(shifted) / 10 ** digits;
+}
+
 export function formatValue(value: number | null, unit: string, hideUnits = false): string {
   if (value === null) return '—';
   const magnitude = Math.abs(value);
   let text: string;
-  if (magnitude >= 10000) text = `${Math.round(value / 1000)}k`;
-  else if (magnitude >= 1000) text = `${Number((value / 1000).toFixed(1))}k`;
-  else if (magnitude >= 100) text = String(Math.round(value));
-  else text = String(Number(value.toFixed(magnitude >= 10 ? 1 : 2)));
+  if (magnitude >= 10000) text = `${roundDecimal(value / 1000, 0)}k`;
+  else if (magnitude >= 1000) text = `${roundDecimal(value / 1000, 1)}k`;
+  else if (magnitude >= 100) text = String(roundDecimal(value, 0));
+  else text = String(roundDecimal(value, magnitude >= 10 ? 1 : 2));
   const suffix = hideUnits ? '' : unit === '%' ? '%' : ['°C', '°F', '°'].includes(unit) ? '°' : '';
   return text + suffix;
 }
