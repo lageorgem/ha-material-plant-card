@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { property } from 'lit/decorators.js';
-import { describeMeasurement, formatValue, gaugeFraction } from '../calc/measurements';
+import { describeMeasurement, formatValue, gaugeFraction, gaugeStatus } from '../calc/measurements';
 import type { Stats24h } from '../data/history-stats';
 import type { GaugeTone, Measurement } from '../types';
 import './range-bar';
@@ -36,6 +36,7 @@ export class MplMetricRow extends LitElement {
   @property({ reflect: true }) tone: GaugeTone = 'unknown';
   @property({ attribute: false }) stats: Stats24h | null = null;
   @property({ type: Boolean, attribute: 'hide-units' }) hideUnits = false;
+  @property({ type: Boolean, attribute: 'show-history' }) showHistory = true;
 
   protected render(): TemplateResult | typeof nothing {
     const m = this.measurement;
@@ -43,77 +44,90 @@ export class MplMetricRow extends LitElement {
     const stats = this.stats;
     const fraction = (value: number | null): number | null =>
       gaugeFraction(value, m.min, m.max, m.unit);
+    const avgStatus = gaugeStatus(stats?.mean ?? null, m.min, m.max);
+    const stat = (label: string, value: number | null): TemplateResult => {
+      const status = gaugeStatus(value, m.min, m.max);
+      return html`<span class=${status === 'low' || status === 'high' ? 'stat out' : 'stat'}>
+        <span class="stat-label">${label}</span><span class="stat-value">${value === null ? '—' : formatCaptionNumber(value)}</span>
+      </span>`;
+    };
 
     return html`
-      <div class="icon"><ha-icon icon=${m.icon} aria-hidden="true"></ha-icon></div>
-      <div class="label">${m.label}</div>
+      <div class="title">
+        <ha-icon icon=${m.icon} aria-hidden="true"></ha-icon>
+        <span class="label">${m.label}</span>
+        ${this.showHistory ? html`<span class="period">Last 24 h</span>` : nothing}
+      </div>
       <div class="value">${formatValue(m.value, m.unit, true)}${!this.hideUnits && m.unit !== ''
         ? html`<span class="unit">${displayUnits[m.unit] ?? m.unit}</span>` : nothing}</div>
-      <div class="range">
-        <mpl-range-bar
+      <mpl-range-bar
           .value=${fraction(m.value)}
           .tone=${this.tone}
           .spanFrom=${stats ? fraction(stats.min) : null}
           .spanTo=${stats ? fraction(stats.max) : null}
           .avg=${stats ? fraction(stats.mean) : null}
-        ></mpl-range-bar>
-        <div class="caption">
-          ${m.min !== null && m.max !== null
-            ? html`<span class="ideal">Ideal ${formatCaptionNumber(m.min)}–${formatCaptionNumber(m.max)}</span>`
-            : nothing}
-          ${stats
-            ? html`<span class="history">24h ${formatCaptionNumber(stats.min)}–${formatCaptionNumber(stats.max)}</span>`
-            : nothing}
-        </div>
-      </div>
+          .avgOk=${avgStatus === 'unknown' ? null : avgStatus === 'ok'}
+          .showTicks=${m.min !== null && m.max !== null}
+      ></mpl-range-bar>
+      ${m.min !== null && m.max !== null
+        ? html`<span class="ideal">Ideal ${formatCaptionNumber(m.min)}–${formatCaptionNumber(m.max)}</span>`
+        : nothing}
+      ${this.showHistory ? html`<div class="stats">
+        ${stat('Min', stats?.min ?? null)}
+        ${stat('Avg', stats?.mean ?? null)}
+        ${stat('Max', stats?.max ?? null)}
+      </div>` : nothing}
     `;
   }
 
   // Like the battery glyph, inherit semantic tokens rather than masking ancestor overrides.
   static styles = css`
     :host {
-      --mpl-metric-icon-size: 36px;
-      --mpl-metric-glyph-size: 20px;
-      --mpl-metric-column-width: 76px;
-      --mpl-metric-column-gap: 10px;
-      --mpl-metric-label-size: 12px;
-      --mpl-metric-label-line: 16px;
-      --mpl-metric-value-size: 20px;
-      --mpl-metric-value-line: 24px;
-      --mpl-metric-value-weight: 500;
-      --mpl-metric-problem-weight: 700;
-      --mpl-metric-unit-gap: 2px;
-      --mpl-metric-unit-size: 11px;
-      --mpl-metric-range-gap: 2px;
-      --mpl-metric-caption-size: 11px;
-      --mpl-metric-caption-line: 14px;
-      --mpl-metric-caption-gap: 6px;
+      --mpl-metric-glyph-size: 18px;
+      --mpl-metric-column-width: 88px;
+      --mpl-metric-column-gap: 12px;
+      --mpl-metric-title-gap: 6px;
+      --mpl-metric-label-size: 14px;
+      --mpl-metric-label-line: 20px;
+      --mpl-metric-label-weight: 500;
+      --mpl-metric-value-size: 22px;
+      --mpl-metric-value-line: 28px;
+      --mpl-metric-value-weight: 400;
+      --mpl-metric-problem-weight: 600;
+      --mpl-metric-unit-gap: 3px;
+      --mpl-metric-unit-size: 13px;
+      --mpl-metric-caption-size: 12px;
+      --mpl-metric-caption-line: 20px;
+      --mpl-metric-period-line: 16px;
+      --mpl-metric-stat-size: 11px;
+      --mpl-metric-stat-line: 16px;
+      --mpl-metric-stat-gap: 3px;
+      --mpl-metric-stats-gap: 4px;
+      --mpl-metric-stat-padding: 6px;
+      --mpl-metric-stat-radius: 6px;
+      --mpl-metric-stat-label-weight: 400;
+      --mpl-metric-stat-value-weight: 600;
       display: grid;
-      grid-template-columns: var(--mpl-metric-icon-size) var(--mpl-metric-column-width) minmax(0, 1fr);
-      grid-template-rows: var(--mpl-metric-label-line) var(--mpl-metric-value-line);
+      grid-template-columns: var(--mpl-metric-column-width) minmax(0, 1fr);
+      grid-template-rows: var(--mpl-metric-label-line) var(--mpl-metric-value-line) var(--mpl-metric-caption-line);
       column-gap: var(--mpl-metric-column-gap);
+      row-gap: 0;
       align-items: center;
       min-width: 0;
     }
-    .icon {
-      grid-column: 1;
-      grid-row: 1 / 3;
+    .title {
+      grid-column: 1 / -1;
+      grid-row: 1;
       display: flex;
+      gap: var(--mpl-metric-title-gap);
       align-items: center;
-      justify-content: center;
-      width: var(--mpl-metric-icon-size);
-      height: var(--mpl-metric-icon-size);
-      border-radius: 50%;
-      background: var(--mpl-surface-container-highest);
-      color: var(--mpl-on-surface-variant);
+      min-width: 0;
     }
-    :host([tone='ok']) .icon {
-      background: color-mix(in srgb, var(--mpl-success) 20%, transparent);
+    :host([tone='ok']) ha-icon {
       color: var(--mpl-success);
     }
-    :host([tone='problem']) .icon {
-      background: var(--mpl-error-container);
-      color: var(--mpl-on-error-container);
+    :host([tone='problem']) ha-icon {
+      color: var(--mpl-error);
     }
     ha-icon {
       --mdc-icon-size: var(--mpl-metric-glyph-size);
@@ -122,21 +136,29 @@ export class MplMetricRow extends LitElement {
       justify-content: center;
       width: var(--mpl-metric-glyph-size);
       height: var(--mpl-metric-glyph-size);
-      color: inherit;
+      flex-shrink: 0;
+      color: var(--mpl-on-surface-variant);
     }
     .label {
-      grid-column: 2;
-      grid-row: 1;
       min-width: 0;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       font-size: var(--mpl-metric-label-size);
       line-height: var(--mpl-metric-label-line);
+      font-weight: var(--mpl-metric-label-weight);
+      color: var(--mpl-on-surface);
+    }
+    .period {
+      margin-left: auto;
+      flex-shrink: 0;
+      white-space: nowrap;
+      font-size: var(--mpl-metric-caption-size);
+      line-height: var(--mpl-metric-period-line);
       color: var(--mpl-on-surface-variant);
     }
     .value {
-      grid-column: 2;
+      grid-column: 1;
       grid-row: 2;
       min-width: 0;
       overflow: hidden;
@@ -156,30 +178,55 @@ export class MplMetricRow extends LitElement {
       margin-left: var(--mpl-metric-unit-gap);
       color: var(--mpl-on-surface-variant);
     }
-    .range {
-      grid-column: 3;
-      grid-row: 1 / 3;
-      display: flex;
-      flex-direction: column;
-      gap: var(--mpl-metric-range-gap);
+    mpl-range-bar {
+      grid-column: 2;
+      grid-row: 2;
       min-width: 0;
     }
-    .caption {
-      display: flex;
-      justify-content: space-between;
-      gap: var(--mpl-metric-caption-gap);
+    .ideal {
+      grid-column: 1;
+      grid-row: 3;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
       font-size: var(--mpl-metric-caption-size);
       line-height: var(--mpl-metric-caption-line);
       color: var(--mpl-on-surface-variant);
       white-space: nowrap;
     }
-    .caption > span {
+    .stats {
+      grid-column: 2;
+      grid-row: 3;
+      display: flex;
+      justify-content: space-between;
+      gap: var(--mpl-metric-stats-gap);
+      align-items: center;
       min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
     }
-    .history {
-      flex-shrink: 0;
+    .stat {
+      display: inline-flex;
+      gap: var(--mpl-metric-stat-gap);
+      height: var(--mpl-metric-caption-line);
+      padding: 0 var(--mpl-metric-stat-padding);
+      border-radius: var(--mpl-metric-stat-radius);
+      font-size: var(--mpl-metric-stat-size);
+      line-height: var(--mpl-metric-stat-line);
+      align-items: center;
+      white-space: nowrap;
+    }
+    .stat-label {
+      color: var(--mpl-on-surface-variant);
+      font-weight: var(--mpl-metric-stat-label-weight);
+    }
+    .stat-value {
+      color: var(--mpl-on-surface);
+      font-weight: var(--mpl-metric-stat-value-weight);
+    }
+    .stat.out {
+      background: var(--mpl-error-container);
+    }
+    .out .stat-label, .out .stat-value {
+      color: var(--mpl-on-error-container);
     }
   `;
 }

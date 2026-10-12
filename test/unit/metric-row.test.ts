@@ -15,10 +15,11 @@ async function row(
   history: Stats24h | null = stats,
   tone: GaugeTone = 'problem',
   hideUnits = false,
+  showHistory = true,
 ): Promise<MplMetricRow> {
   return fixture<MplMetricRow>(html`
     <mpl-metric-row .measurement=${measurement} .stats=${history}
-      .tone=${tone} .hideUnits=${hideUnits}></mpl-metric-row>
+      .tone=${tone} .hideUnits=${hideUnits} .showHistory=${showHistory}></mpl-metric-row>
   `);
 }
 
@@ -26,70 +27,40 @@ function element(el: MplMetricRow, selector: string): HTMLElement {
   return el.shadowRoot!.querySelector<HTMLElement>(selector)!;
 }
 
+function badges(el: MplMetricRow): HTMLElement[] {
+  return Array.from(el.shadowRoot!.querySelectorAll<HTMLElement>('.stat'));
+}
+
 describe('mpl-metric-row', () => {
-  it('renders the moisture example in a 40px content grid', async () => {
+  it('renders the inline title, value, ideal and ordered badges in a 68px grid', async () => {
     const el = await row();
     const style = getComputedStyle(el);
     expect(style.display).to.equal('grid');
-    expect(style.gridTemplateRows).to.equal('16px 24px');
-    expect(style.gridTemplateColumns.split(' ').slice(0, 2)).to.deep.equal(['36px', '76px']);
-    expect(style.columnGap).to.equal('10px');
-    expect(getComputedStyle(element(el, '.icon')).width).to.equal('36px');
-    expect(getComputedStyle(element(el, '.icon')).height).to.equal('36px');
-    expect(getComputedStyle(element(el, '.caption')).gap).to.equal('6px');
-    expect(getComputedStyle(element(el, '.history')).flexShrink).to.equal('0');
-    expect(el.getBoundingClientRect().height).to.equal(40);
+    expect(style.gridTemplateRows).to.equal('20px 28px 20px');
+    expect(style.gridTemplateColumns.split(' ')[0]).to.equal('88px');
+    expect(style.columnGap).to.equal('12px');
+    expect(style.rowGap).to.equal('0px');
+    expect(el.getBoundingClientRect().height).to.equal(68);
+    expect(Array.from(element(el, '.title').children).map(child => child.tagName)).to.deep.equal([
+      'HA-ICON', 'SPAN', 'SPAN',
+    ]);
     expect(element(el, '.label').textContent).to.equal('Moisture');
-    expect(element(el, '.value').textContent!.trim()).to.equal('13%');
-    expect(element(el, '.unit').textContent).to.equal('%');
+    expect(element(el, '.period').textContent).to.equal('Last 24 h');
     expect(element(el, 'ha-icon').getAttribute('icon')).to.equal('mdi:water');
+    expect(element(el, 'ha-icon').getAttribute('aria-hidden')).to.equal('true');
+    expect(getComputedStyle(element(el, '.title')).gap).to.equal('6px');
+    expect(element(el, '.value').textContent!.trim()).to.equal('13%');
     expect(element(el, '.ideal').textContent).to.equal('Ideal 15–65');
-    expect(element(el, '.history').textContent).to.equal('24h 12–31');
+    expect(badges(el).map(stat => [stat.children[0].textContent, stat.children[1].textContent]))
+      .to.deep.equal([['Min', '12'], ['Avg', '22'], ['Max', '31']]);
+    expect(el.shadowRoot!.querySelector('.caption')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.icon')).to.equal(null);
   });
 
-  it('abbreviates illuminance captions and formats the number without its unit', async () => {
-    const el = await row({ ...moisture, key: 'illuminance', label: 'Illuminance',
-      value: 22, min: 2000, max: 30000, unit: 'lx' });
-    expect(element(el, '.ideal').textContent).to.equal('Ideal 2k–30k');
-    expect(element(el, '.value').textContent!.trim()).to.equal('22lx');
-  });
-
-  it('renders compact captions for the live moisture, DLI, and illuminance cases', async () => {
-    const el = await row({ ...moisture, min: 30, max: 85 }, { min: 53.4, max: 62.5, mean: 58 });
-    expect(element(el, '.ideal').textContent).to.equal('Ideal 30–85');
-    expect(element(el, '.history').textContent).to.equal('24h 53–63');
-    el.stats = { min: 1, max: 1.37, mean: 1.2 };
-    el.measurement = { ...moisture, min: 1500, max: 25000 };
-    await el.updateComplete;
-    expect(element(el, '.history').textContent).to.equal('24h 1–1.4');
+  it('formats compact ideal and history numbers', async () => {
+    const el = await row({ ...moisture, min: 1500, max: 25000 }, { min: 1, mean: 1.2, max: 1.37 });
     expect(element(el, '.ideal').textContent).to.equal('Ideal 1.5k–25k');
-  });
-
-  it('shows both compact captions fully in a 295px row', async () => {
-    const el = await row({ ...moisture, min: 30, max: 85 }, { min: 53.4, max: 62.5, mean: 58 });
-    el.style.width = '295px';
-    el.style.fontFamily = 'Arial, sans-serif';
-    for (const selector of ['.ideal', '.history']) {
-      const caption = element(el, selector);
-      expect(caption.scrollWidth).to.be.at.most(caption.clientWidth);
-    }
-  });
-
-  it('shortens DLI units within the value column without shrinking the number', async () => {
-    const el = await row({ ...moisture, value: 0.04, unit: 'mol/d⋅m²' });
-    el.style.width = '295px';
-    el.style.fontFamily = 'Arial, sans-serif';
-    const value = element(el, '.value');
-    const style = getComputedStyle(value);
-    expect(value.textContent!.trim()).to.equal('0.04mol/d');
-    expect(value.scrollWidth).to.be.at.most(value.clientWidth);
-    expect(value.getBoundingClientRect().right).to.be.at.most(element(el, '.range').getBoundingClientRect().left);
-    expect(style.overflow).to.equal('hidden');
-    expect(style.whiteSpace).to.equal('nowrap');
-    expect(style.textOverflow).to.equal('ellipsis');
-    expect(style.display).not.to.equal('flex');
-    expect(style.fontSize).to.equal('20px');
-    expect(getComputedStyle(element(el, '.unit')).fontSize).to.equal('11px');
+    expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(['1', '1.2', '1.4']);
   });
 
   for (const unit of ['mol/d⋅m²', 'mol/d·m²', 'mol/(d⋅m²)']) {
@@ -102,7 +73,7 @@ describe('mpl-metric-row', () => {
     });
   }
 
-  it('omits units when hidden or empty and shows an em dash for a null value', async () => {
+  it('omits hidden or empty units and shows an em dash for a null value', async () => {
     for (const [measurement, hideUnits] of [
       [moisture, true], [{ ...moisture, unit: '' }, false],
     ] as const) {
@@ -114,104 +85,158 @@ describe('mpl-metric-row', () => {
     expect(element(el, '.value').textContent!.trim()).to.equal('—');
   });
 
-  it('omits only the unavailable caption parts', async () => {
+  it('omits the ideal if either bound is missing', async () => {
     for (const measurement of [{ ...moisture, min: null }, { ...moisture, max: null }]) {
       const el = await row(measurement);
       expect(el.shadowRoot!.querySelector('.ideal')).to.equal(null);
-      expect(element(el, '.history').textContent).to.equal('24h 12–31');
+      expect(badges(el)).to.have.length(3);
+      expect(badges(el).some(stat => stat.classList.contains('out'))).to.equal(false);
     }
-    const el = await row(moisture, null);
-    expect(el.shadowRoot!.querySelector('.history')).to.equal(null);
-    expect(element(el, '.ideal').textContent).to.equal('Ideal 15–65');
-    const neither = await row({ ...moisture, min: null }, null);
-    expect(element(neither, '.caption').children.length).to.equal(0);
   });
 
-  it('maps all range-bar properties from the raw values, including logarithmic lx', async () => {
+  it('shows three neutral dashes without stats and hides history only when requested', async () => {
+    const el = await row(moisture, null);
+    expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(['—', '—', '—']);
+    expect(badges(el).some(stat => stat.classList.contains('out'))).to.equal(false);
+    expect(element(el, '.period').textContent).to.equal('Last 24 h');
+    el.showHistory = false;
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.stats')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.period')).to.equal(null);
+    expect(element(el, '.ideal').textContent).to.equal('Ideal 15–65');
+  });
+
+  it('maps range-bar props from raw values, including log lx and average status', async () => {
     for (const measurement of [moisture, { ...moisture, value: 4000, min: 2000, max: 30000, unit: 'lx' }]) {
       const history = measurement.unit === 'lx' ? { min: 3000, max: 20000, mean: 10000 } : stats;
       const el = await row(measurement, history);
       const bar = element(el, 'mpl-range-bar') as HTMLElement & {
         value: number | null; spanFrom: number | null; spanTo: number | null;
-        avg: number | null; tone: GaugeTone;
+        avg: number | null; avgOk: boolean | null; tone: GaugeTone; showTicks: boolean;
       };
       const fraction = (value: number | null) => gaugeFraction(value, measurement.min, measurement.max, measurement.unit);
       expect(bar.value).to.equal(fraction(measurement.value));
       expect(bar.spanFrom).to.equal(fraction(history.min));
       expect(bar.spanTo).to.equal(fraction(history.max));
       expect(bar.avg).to.equal(fraction(history.mean));
+      expect(bar.avgOk).to.equal(true);
+      expect(bar.showTicks).to.equal(true);
       expect(bar.tone).to.equal('problem');
+      for (const mean of [measurement.min! - 1, measurement.max! + 1]) {
+        el.stats = { ...history, mean };
+        await el.updateComplete;
+        expect(bar.avgOk).to.equal(false);
+      }
       el.stats = null;
       el.tone = 'advisory';
       await el.updateComplete;
       expect(bar.spanFrom).to.equal(null);
       expect(bar.spanTo).to.equal(null);
       expect(bar.avg).to.equal(null);
+      expect(bar.avgOk).to.equal(null);
       expect(bar.tone).to.equal('advisory');
-      el.measurement = { ...measurement, value: null, min: null };
-      el.stats = stats;
-      await el.updateComplete;
-      expect(bar.value).to.equal(null);
-      expect(bar.spanFrom).to.equal(null);
-      expect(bar.spanTo).to.equal(null);
-      expect(bar.avg).to.equal(null);
+      for (const bounds of [{ min: null }, { max: null }, { min: measurement.max }]) {
+        el.measurement = { ...measurement, value: null, ...bounds };
+        el.stats = history;
+        await el.updateComplete;
+        expect(bar.value).to.equal(null);
+        expect(bar.spanFrom).to.equal(null);
+        expect(bar.spanTo).to.equal(null);
+        expect(bar.avg).to.equal(null);
+        expect(bar.avgOk).to.equal(null);
+        expect(bar.showTicks).to.equal(el.measurement.min !== null && el.measurement.max !== null);
+      }
     }
   });
 
-  it('uses ancestor semantic tokens for every tone and value style', async () => {
+  it('inherits semantic colours for every icon tone, value, unit and out badge', async () => {
     const wrapper = await fixture<HTMLElement>(html`
       <div style="--mpl-success:#008000; --mpl-error:#ff0000;
         --mpl-error-container:#ffeeee; --mpl-on-error-container:#800000;
-        --mpl-surface-container-highest:#dddddd; --mpl-on-surface-variant:#444444;
-        --mpl-on-surface:#111111">
-        <span class="mix-reference" style="background:color-mix(in srgb, var(--mpl-success) 20%, transparent)"></span>
-        <mpl-metric-row .measurement=${moisture}></mpl-metric-row>
+        --mpl-on-surface-variant:#444444; --mpl-on-surface:#111111">
+        <mpl-metric-row .measurement=${moisture} .stats=${{ min: 15, mean: 22, max: 70 }}></mpl-metric-row>
       </div>
     `);
     const el = wrapper.querySelector('mpl-metric-row')!;
-    const cases: [GaugeTone, string, string, string, string][] = [
-      ['ok', getComputedStyle(wrapper.querySelector('.mix-reference')!).backgroundColor,
-        'rgb(0, 128, 0)', 'rgb(17, 17, 17)', '500'],
-      ['problem', 'rgb(255, 238, 238)', 'rgb(128, 0, 0)', 'rgb(255, 0, 0)', '700'],
-      ['advisory', 'rgb(221, 221, 221)', 'rgb(68, 68, 68)', 'rgb(17, 17, 17)', '500'],
-      ['unknown', 'rgb(221, 221, 221)', 'rgb(68, 68, 68)', 'rgb(17, 17, 17)', '500'],
+    const cases: [GaugeTone, string, string, string][] = [
+      ['ok', 'rgb(0, 128, 0)', 'rgb(17, 17, 17)', '400'],
+      ['problem', 'rgb(255, 0, 0)', 'rgb(255, 0, 0)', '600'],
+      ['advisory', 'rgb(68, 68, 68)', 'rgb(17, 17, 17)', '400'],
+      ['unknown', 'rgb(68, 68, 68)', 'rgb(17, 17, 17)', '400'],
     ];
-    for (const [tone, background, iconColor, valueColor, weight] of cases) {
+    for (const [tone, iconColor, valueColor, weight] of cases) {
       el.tone = tone;
       await el.updateComplete;
-      expect(getComputedStyle(element(el, '.icon')).backgroundColor).to.equal(background);
       const icon = getComputedStyle(element(el, 'ha-icon'));
       expect(icon.color).to.equal(iconColor);
-      expect(icon.width).to.equal('20px');
-      expect(icon.height).to.equal('20px');
+      expect(icon.width).to.equal('18px');
+      expect(icon.height).to.equal('18px');
       expect(icon.display).to.equal('flex');
       expect(icon.alignItems).to.equal('center');
       expect(icon.justifyContent).to.equal('center');
-      expect(getComputedStyle(element(el, '.value')).color).to.equal(valueColor);
-      expect(getComputedStyle(element(el, '.value')).fontWeight).to.equal(weight);
-      expect(getComputedStyle(element(el, '.unit')).color).to.equal('rgb(68, 68, 68)');
+      const value = getComputedStyle(element(el, '.value'));
+      expect(value.color).to.equal(valueColor);
+      expect(value.fontWeight).to.equal(weight);
+      expect(value.fontSize).to.equal('22px');
+      expect(value.lineHeight).to.equal('28px');
+      const unit = getComputedStyle(element(el, '.unit'));
+      expect(unit.color).to.equal('rgb(68, 68, 68)');
+      expect(unit.fontSize).to.equal('13px');
+      expect(unit.marginLeft).to.equal('3px');
+    }
+    const [min, avg, max] = badges(el);
+    for (const stat of [min, avg]) {
+      expect(stat.classList.contains('out')).to.equal(false);
+      expect(getComputedStyle(stat).backgroundColor).to.equal('rgba(0, 0, 0, 0)');
+      expect(getComputedStyle(stat.children[0]).color).to.equal('rgb(68, 68, 68)');
+      expect(getComputedStyle(stat.children[1]).color).to.equal('rgb(17, 17, 17)');
+    }
+    expect(max.classList.contains('out')).to.equal(true);
+    expect(getComputedStyle(max).backgroundColor).to.equal('rgb(255, 238, 238)');
+    for (const child of max.children) expect(getComputedStyle(child).color).to.equal('rgb(128, 0, 0)');
+  });
+
+  it('fits three out-of-range VPD badges in a 271px row', async () => {
+    const el = await row({ ...moisture, key: 'vpd', label: 'VPD', unit: 'kPa', min: 0.4, max: 1.6 },
+      { min: 0.2, mean: 1.8, max: 2.1 });
+    el.style.width = '271px';
+    el.style.fontFamily = 'Arial, sans-serif';
+    expect(badges(el).every(stat => stat.classList.contains('out'))).to.equal(true);
+    expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(['0.2', '1.8', '2.1']);
+    const history = element(el, '.stats');
+    expect(history.scrollWidth).to.be.at.most(history.clientWidth);
+    expect(el.scrollWidth).to.be.at.most(el.clientWidth);
+  });
+
+  it('does not truncate DLI 0.04 mol/d or Ideal 1.5k–25k in a 271px row', async () => {
+    const el = await row({ ...moisture, key: 'dli', label: 'DLI', value: 0.04,
+      unit: 'mol/d⋅m²', min: 1500, max: 25000 });
+    el.style.width = '271px';
+    el.style.fontFamily = 'Arial, sans-serif';
+    expect(element(el, '.value').textContent!.trim()).to.equal('0.04mol/d');
+    expect(element(el, '.ideal').textContent).to.equal('Ideal 1.5k–25k');
+    for (const selector of ['.value', '.ideal']) {
+      const content = element(el, selector);
+      expect(content.scrollWidth).to.be.at.most(content.clientWidth);
+      const style = getComputedStyle(content);
+      expect(style.overflow).to.equal('hidden');
+      expect(style.whiteSpace).to.equal('nowrap');
+      expect(style.textOverflow).to.equal('ellipsis');
     }
   });
 
-  it('ellipsizes long labels and captions without expanding the 76px column', async () => {
-    const wrapper = await fixture<HTMLElement>(html`
-      <div style="width:287px">
-        <mpl-metric-row .measurement=${{ ...moisture, label: 'A very long soil temperature measurement label' }}
-          .stats=${{ min: -12345, max: 98765, mean: 22 }}></mpl-metric-row>
-      </div>
-    `);
-    const el = wrapper.querySelector('mpl-metric-row')!;
-    await el.updateComplete;
+  it('ellipsizes long labels without expanding the grid or displacing the period', async () => {
+    const el = await row({ ...moisture, label: 'A very long soil temperature measurement label' });
+    el.style.width = '271px';
     const label = element(el, '.label');
-    expect(label.getBoundingClientRect().width).to.equal(76);
     expect(label.scrollWidth).to.be.greaterThan(label.clientWidth);
-    for (const selector of ['.label', '.ideal', '.history']) {
-      const style = getComputedStyle(element(el, selector));
-      expect(style.whiteSpace).to.equal('nowrap');
-      expect(style.overflow).to.equal('hidden');
-      expect(style.textOverflow).to.equal('ellipsis');
-    }
-    expect(el.getBoundingClientRect().height).to.equal(40);
+    const style = getComputedStyle(label);
+    expect(style.whiteSpace).to.equal('nowrap');
+    expect(style.overflow).to.equal('hidden');
+    expect(style.textOverflow).to.equal('ellipsis');
+    const period = element(el, '.period');
+    expect(period.scrollWidth).to.be.at.most(period.clientWidth);
+    expect(el.getBoundingClientRect().height).to.equal(68);
     expect(el.scrollWidth).to.equal(el.clientWidth);
   });
 });
