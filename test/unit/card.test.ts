@@ -134,7 +134,9 @@ describe('material-plant-card', () => {
         expect(query(card, '.tooltip')).to.equal(null);
         await clock.tickAsync(1);
         await settle(card);
-        expect(query(card, '[role="tooltip"]').textContent).to.equal('Moisture: 6 % (15–60 %) · low');
+        expect(query(card, '[role="tooltip"] .tooltip-title').textContent).to.equal('Moisture · too low');
+        expect(query(card, '[role="tooltip"] .tooltip-body').textContent).to.equal('6 % · ideal 15–60 %');
+        expect(button.getAttribute('aria-label')).to.equal('Moisture: 6 % (15–60 %) · low');
         expect(button.getAttribute('aria-describedby')).to.equal('mpl-tooltip');
         pointer(button, 'pointerup', pointerType);
         const click = new MouseEvent('click', { bubbles: true, composed: true, cancelable: true });
@@ -191,13 +193,15 @@ describe('material-plant-card', () => {
       expect(query(card, '.tooltip')).to.equal(null);
       await clock.tickAsync(1);
       await settle(card);
-      expect(query(card, '.tooltip').textContent).to.equal(buttons[0].getAttribute('aria-label'));
+      expect(query(card, '.tooltip-title').textContent).to.equal('Moisture');
+      expect(query(card, '.tooltip-body').textContent).to.equal('25 % · ideal 10–50 %');
       pointer(buttons[1], 'pointerenter', 'mouse');
       await settle(card);
       expect(query(card, '.tooltip')).to.equal(null);
       await clock.tickAsync(500);
       await settle(card);
-      expect(query(card, '.tooltip').textContent).to.equal(buttons[1].getAttribute('aria-label'));
+      expect(query(card, '.tooltip-title').textContent).to.equal('Conductivity');
+      expect(query(card, '.tooltip-body').textContent).to.equal('25 % · ideal 10–50 %');
       pointer(buttons[1], 'pointerleave', 'mouse');
       await settle(card);
       expect(query(card, '.tooltip')).to.equal(null);
@@ -214,7 +218,8 @@ describe('material-plant-card', () => {
       sinon.stub(button, 'matches').withArgs(':focus-visible').returns(true);
       button.focus();
       await settle(card);
-      expect(query(card, '.tooltip').textContent).to.equal(button.getAttribute('aria-label'));
+      expect(query(card, '.tooltip-title').textContent).to.equal('Moisture');
+      expect(query(card, '.tooltip-body').textContent).to.equal('25 % · ideal 10–50 %');
       button.blur();
       await settle(card);
       expect(query(card, '.tooltip')).to.equal(null);
@@ -251,6 +256,42 @@ describe('material-plant-card', () => {
         card.remove();
       });
     }
+
+    it('keeps rounded tooltip lines at 16px high without wrapping at 327px', async () => {
+      const hass = fakeHass({
+        humidity: { current: 65.56, min: 20, max: 60, unit_of_measurement: '%' },
+        illuminance: { current: 22, min: 2000, max: 30000, unit_of_measurement: 'lx' },
+        temperature: { current: 21.6, min: 15, max: 32, unit_of_measurement: '°C' },
+      });
+      const card = await mount(cfg({ show_bars: ['humidity', 'illuminance', 'temperature'] }), hass);
+      card.style.width = '327px';
+      await settleLayout(card);
+      const buttons = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')];
+      for (const [index, title, body] of [
+        [0, 'Air humidity · too high', '65.6 % · ideal 20–60 %'],
+        [1, 'Illuminance · too low', '22 lx · ideal 2000–30000 lx'],
+        [2, 'Temperature', '21.6 °C · ideal 15–32 °C'],
+      ] as const) {
+        const button = buttons[index];
+        sinon.stub(button, 'matches').withArgs(':focus-visible').returns(true);
+        button.focus();
+        await settle(card);
+        query(card, '.tooltip').style.animation = 'none';
+        expect(query(card, '.tooltip-title').textContent).to.equal(title);
+        expect(query(card, '.tooltip-body').textContent).to.equal(body);
+        for (const selector of ['.tooltip-title', '.tooltip-body']) {
+          const line = query(card, selector);
+          const style = getComputedStyle(line);
+          expect(style.whiteSpace).to.equal('nowrap');
+          expect(style.lineHeight).to.equal('16px');
+          expect(style.fontSize).to.equal('12px');
+          expect(style.fontWeight).to.equal(selector === '.tooltip-title' ? '500' : '400');
+          expect(line.getBoundingClientRect().height).to.equal(16);
+        }
+        button.blur();
+        await settle(card);
+      }
+    });
 
     it('clamps first and last gauge tooltips within a 240px card and places them 4px above', async () => {
       const card = await mount();

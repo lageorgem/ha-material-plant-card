@@ -3,7 +3,7 @@ import { property, state } from 'lit/decorators.js';
 import type { HomeAssistant } from 'custom-card-helpers';
 import { CARD_NAME, CARD_DISPLAY_NAME, CARD_DESCRIPTION, CARD_VERSION } from './const';
 import { DEFAULT_GAUGES, type MaterialPlantCardConfig, type PlantInfo } from './types';
-import { buildMeasurements, activeProblems, toneFor, formatValue, describeMeasurement, batteryInfo } from './calc/measurements';
+import { buildMeasurements, activeProblems, toneFor, formatValue, describeMeasurement, tooltipLines, batteryInfo } from './calc/measurements';
 import { configForm } from './config-form';
 import { themeTokens } from './theme';
 import './gauge/plant-gauge';
@@ -302,6 +302,7 @@ export class MaterialPlantCard extends LitElement {
     const measurements = buildMeasurements(this._info, cfg.show_bars ?? DEFAULT_GAUGES, this.hass.states);
     const tooltipIndex = this._tooltip ? Array.from(this.shadowRoot!.querySelectorAll('.gauge-btn')).indexOf(this._tooltip) : -1;
     const tooltipMeasurement = measurements[tooltipIndex];
+    const tooltipText = tooltipMeasurement ? tooltipLines(tooltipMeasurement) : undefined;
     const n = measurements.length;
     const rows = Math.ceil(n / this._gaugeCapacity);
     const columns = n ? Math.ceil(n / rows) : 1;
@@ -354,14 +355,19 @@ export class MaterialPlantCard extends LitElement {
             <mpl-gauge .embedded=${true} .fraction=${m.fraction} .tone=${toneFor(m, problems)} .icon=${m.icon}
               .value=${hideUnits ? '' : formatValue(m.value, m.unit, hideUnits)} .label=${describeMeasurement(m)}></mpl-gauge>
           </button>`)}</div>` : nothing}
-        ${this._tooltip && tooltipMeasurement ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip">${describeMeasurement(tooltipMeasurement)}</div>` : nothing}
+        ${this._tooltip && tooltipText ? html`<div class="tooltip" role="tooltip" id="mpl-tooltip">
+          <span class="tooltip-title">${tooltipText[0]}</span>
+          <span class="tooltip-body">${tooltipText[1]}</span>
+        </div>` : nothing}
       </ha-card>`;
   }
 
   static styles = [themeTokens, css`
     :host { display: block; }
     ha-card { position: relative; display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
-    .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: min(220px, calc(100% - 16px)); width: max-content; white-space: normal; overflow-wrap: anywhere; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
+    .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
+    .tooltip-title, .tooltip-body { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tooltip-title { font-weight: 500; }
     @keyframes tooltip-enter { from { opacity: 0; transform: scale(.8); } to { opacity: 1; transform: scale(1); } }
     @media (prefers-reduced-motion: reduce) { .tooltip { animation: none; } }
     .header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }

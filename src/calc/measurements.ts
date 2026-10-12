@@ -82,6 +82,18 @@ export function formatValue(value: number | null, unit: string, hideUnits = fals
   return text + suffix;
 }
 
+export function tooltipLines(m: Measurement): [string, string] {
+  const num = (value: number): string => {
+    const magnitude = Math.abs(value);
+    return String(roundDecimal(value, magnitude >= 100 ? 0 : magnitude >= 10 ? 1 : 2));
+  };
+  const unit = m.unit ? ` ${m.unit}` : '';
+  const status = m.status === 'low' ? ' · too low' : m.status === 'high' ? ' · too high' : '';
+  const value = m.value === null ? '—' : num(m.value);
+  const range = m.min === null || m.max === null ? '' : ` · ideal ${num(m.min)}–${num(m.max)}${unit}`;
+  return [m.label + status, `${value}${unit}${range}`];
+}
+
 export function describeMeasurement(m: Measurement): string {
   const unit = m.unit ? ` ${m.unit}` : '';
   const value = m.value === null ? '—' : String(m.value);

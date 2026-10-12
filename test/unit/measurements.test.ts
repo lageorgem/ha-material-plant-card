@@ -1,7 +1,7 @@
 import { expect } from '@open-wc/testing';
 import {
   activeProblems, batteryInfo, buildMeasurements, describeMeasurement, formatValue,
-  gaugeFraction, gaugeStatus, toneFor, toNumber,
+  gaugeFraction, gaugeStatus, toneFor, tooltipLines, toNumber,
 } from '../../src/calc/measurements';
 import { DEFAULT_GAUGES, DEFAULT_ICONS, MEASUREMENT_KEYS, MEASUREMENT_LABELS } from '../../src/types';
 import type { Measurement, PlantInfo, Problem } from '../../src/types';
@@ -108,6 +108,30 @@ describe('buildMeasurements', () => {
 });
 
 describe('measurement presentation', () => {
+  it('provides two rounded tooltip lines with full units and ideal bounds', () => {
+    for (const [overrides, expected] of [
+      [{ label: 'Air humidity', value: 65.56, min: 20, max: 60, status: 'high' }, ['Air humidity · too high', '65.6 % · ideal 20–60 %']],
+      [{ label: 'Illuminance', value: 22, min: 2000, max: 30000, unit: 'lx', status: 'low' }, ['Illuminance · too low', '22 lx · ideal 2000–30000 lx']],
+      [{ label: 'DLI', value: 0.0384, min: 7.2, max: 14.4, unit: 'mol/d⋅m²', status: 'low' }, ['DLI · too low', '0.04 mol/d⋅m² · ideal 7.2–14.4 mol/d⋅m²']],
+      [{ label: 'Temperature', value: 21.6, min: 15, max: 32, unit: '°C', status: 'ok' }, ['Temperature', '21.6 °C · ideal 15–32 °C']],
+      [{ value: null, min: null, max: null, unit: '', status: 'unknown' }, ['Moisture', '—']],
+    ] satisfies [Partial<Measurement>, [string, string]][]) {
+      expect(tooltipLines(measurement(overrides))).to.deep.equal(expected);
+    }
+  });
+
+  it('rounds tooltip decimal ties safely, strips zeros, and omits incomplete ranges', () => {
+    for (const [value, expected] of [
+      [1.005, '1.01'], [-1.005, '-1.01'], [57.15, '57.2'], [-57.15, '-57.2'],
+      [100.5, '101'], [-100.5, '-101'], [30000, '30000'], [10, '10'],
+      [9.996, '10'], [0, '0'],
+    ] as const) {
+      expect(tooltipLines(measurement({ value, min: null, unit: '' }))[1]).to.equal(expected);
+    }
+    expect(tooltipLines(measurement({ max: null }))[1]).to.equal('13 %');
+    expect(tooltipLines(measurement({ value: null }))[1]).to.equal('— % · ideal 15–65 %');
+  });
+
   it('formats every contract example and magnitude boundary', () => {
     for (const [value, unit, expected] of [
       [21.6, '°C', '21.6°'], [57.16, '%', '57.2%'], [22, 'lx', '22'],
