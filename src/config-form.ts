@@ -53,6 +53,7 @@ const labels: Readonly<Record<string, string>> = {
   display_type: 'Display type',
   show_bars: 'Gauges',
   hide_units: 'Hide units',
+  hide_history: 'Hide 24-hour history',
   problem_source: 'Problem source',
   problem_sensors: 'Problem sensors',
   hide_species: 'Hide species',
@@ -62,6 +63,8 @@ const labels: Readonly<Record<string, string>> = {
 };
 
 const helpers: Readonly<Record<string, string>> = {
+  hide_units: 'Hides units next to values.',
+  hide_history: 'Full mode only: skips the last-24-hours range and average.',
   show_bars: `Default: ${DEFAULT_GAUGES.map((key) => MEASUREMENT_LABELS[key]).join(', ')}.`,
   problem_source: "Plant monitor follows the integration's problem triggers; Gauges flags any out-of-range value.",
   problem_sensors: 'Leave empty to allow every sensor.',
@@ -75,15 +78,19 @@ const schema: HaFormSchema[] = [
   { name: 'battery_sensor', selector: { entity: { domain: 'sensor', device_class: 'battery' } } },
   { name: 'display_type', selector: { select: {
     mode: 'dropdown',
-    options: [{ value: 'full', label: 'Full' }, { value: 'compact', label: 'Compact' }],
+    options: [
+      { value: 'full', label: 'Full (metric tiles)' },
+      { value: 'compact', label: 'Compact (gauges)' },
+    ],
   } } },
   {
-    type: 'expandable', name: '', title: 'Gauges', icon: 'mdi:gauge', flatten: true,
+    type: 'expandable', name: '', title: 'Metrics', icon: 'mdi:gauge', flatten: true,
     schema: [
       { name: 'show_bars', selector: { select: {
         multiple: true, reorder: true, mode: 'list', options: measurementOptions(),
       } } },
       { name: 'hide_units', selector: { boolean: {} } },
+      { name: 'hide_history', selector: { boolean: {} } },
     ],
   },
   {

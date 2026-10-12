@@ -25,11 +25,13 @@ export interface MaterialPlantCardConfig {
   type: string;
   entity: string;
   name?: string;
+  // 'full' = metric tiles (default); 'compact' = gauges.
   display_type?: 'full' | 'compact';
   show_bars?: string[];
   hide_species?: boolean;
   hide_image?: boolean;
   hide_units?: boolean;
+  hide_history?: boolean;
   image?: string;
   battery_sensor?: string;
   // Battery turns red below this level; defaults to 10.
