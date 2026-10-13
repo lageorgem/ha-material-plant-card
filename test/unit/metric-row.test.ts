@@ -19,11 +19,10 @@ async function row(
   history: Stats24h | null = stats,
   tone: GaugeTone = 'problem',
   hideUnits = false,
-  showHistory = true,
 ): Promise<MplMetricRow> {
   return fixture<MplMetricRow>(html`
     <mpl-metric-row .measurement=${measurement} .history=${history ? withStats(history) : null}
-      .tone=${tone} .hideUnits=${hideUnits} .showHistory=${showHistory}></mpl-metric-row>
+      .tone=${tone} .hideUnits=${hideUnits}></mpl-metric-row>
   `);
 }
 
@@ -96,7 +95,7 @@ describe('mpl-metric-row', () => {
     });
   }
 
-  it('defaults the period label and reactively renders custom labels only with history', async () => {
+  it('defaults the period label and reactively renders custom labels', async () => {
     const el = await row();
     expect(el.periodLabel).to.equal('Today');
     for (const periodLabel of ['Last 7 d', 'Daily · 7 d']) {
@@ -104,9 +103,6 @@ describe('mpl-metric-row', () => {
       await el.updateComplete;
       expect(element(el, '.period').textContent).to.equal(periodLabel);
     }
-    el.showHistory = false;
-    await el.updateComplete;
-    expect(el.shadowRoot!.querySelector('.period')).to.equal(null);
   });
 
   it('keeps period labels unshrunk beside Soil temperature in a 271px row', async () => {
@@ -160,15 +156,11 @@ describe('mpl-metric-row', () => {
     }
   });
 
-  it('shows three neutral dashes without stats and hides history only when requested', async () => {
+  it('shows three neutral dashes without stats', async () => {
     const el = await row(moisture, null);
     expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(['—', '—', '—']);
     expect(badges(el).some(stat => stat.classList.contains('out'))).to.equal(false);
     expect(element(el, '.period').textContent).to.equal('Today');
-    el.showHistory = false;
-    await el.updateComplete;
-    expect(el.shadowRoot!.querySelector('.stats')).to.equal(null);
-    expect(el.shadowRoot!.querySelector('.period')).to.equal(null);
     expect(element(el, '.ideal').textContent).to.equal('Ideal 15–65');
   });
 
@@ -543,6 +535,23 @@ describe('mpl-metric-row graph display', () => {
     await el.updateComplete;
     expect(graph(el).points[0].label).to.match(/ · 0\.04$/);
   });
+
+  for (const unit of ['%', 'mol/d⋅m²', '']) {
+    it(`hides graph value and bubble units reactively for ${unit || 'unitless'} measurements`, async () => {
+      const measurement = { ...moisture, unit };
+      const el = await graphRow(measurement);
+      el.hideUnits = true;
+      await el.updateComplete;
+      expect(el.shadowRoot!.querySelector('.unit')).to.equal(null);
+      expect(element(el, '.value').textContent!.trim()).to.equal('13');
+      const formatter = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' });
+      expect(graph(el).points.map(point => point.label)).to.deep.equal(history.series.map(({ t, v }) =>
+        `${formatter.format(t)} · ${formatValue(v, unit, true)}`));
+      el.hideUnits = false;
+      await el.updateComplete;
+      expect(graph(el).points[0].label).to.equal(`${formatter.format(start)} · 12${unit ? ` ${unit === 'mol/d⋅m²' ? 'mol/d' : unit}` : ''}`);
+    });
+  }
 
   it('formats hourly, multi-day and daily labels in the supplied HA time zone', async () => {
     const timestamp = Date.UTC(2026, 6, 15, 21, 30);

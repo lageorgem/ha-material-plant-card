@@ -37,7 +37,6 @@ export class MplMetricRow extends LitElement {
   @property() locale?: string;
   @property({ attribute: 'time-zone' }) timeZone?: string;
   @property({ type: Boolean, attribute: 'hide-units' }) hideUnits = false;
-  @property({ type: Boolean, attribute: 'show-history' }) showHistory = true;
   @property({ type: String, attribute: 'period-label' }) periodLabel = 'Today';
 
   protected render(): TemplateResult | typeof nothing {
@@ -66,7 +65,7 @@ export class MplMetricRow extends LitElement {
           ? { hour: '2-digit', minute: '2-digit' }
           : { weekday: 'short', hour: '2-digit', minute: '2-digit' };
       const formatter = new Intl.DateTimeFormat(this.locale, { ...timeOptions, timeZone: this.timeZone });
-      const displayUnit = displayUnits[m.unit] ?? m.unit;
+      const displayUnit = this.hideUnits ? '' : displayUnits[m.unit] ?? m.unit;
       const points = series.map(({ t, v }) => ({
         t, f: scale.map(v),
         label: `${formatter.format(t)} · ${formatValue(v, m.unit, true)}${displayUnit ? ' ' + displayUnit : ''}`,
@@ -91,7 +90,7 @@ export class MplMetricRow extends LitElement {
       <div class="title">
         <ha-icon icon=${m.icon} aria-hidden="true"></ha-icon>
         <span class="label">${m.label}</span>
-        ${this.showHistory ? html`<span class="period">${this.periodLabel}</span>` : nothing}
+        <span class="period">${this.periodLabel}</span>
       </div>
       <div class="value">${formatValue(m.value, m.unit, true)}${!this.hideUnits && m.unit !== ''
         ? html`<span class="unit">${displayUnits[m.unit] ?? m.unit}</span>` : nothing}</div>
@@ -107,7 +106,7 @@ export class MplMetricRow extends LitElement {
       ${m.min !== null && m.max !== null
         ? html`<span class="ideal">Ideal ${formatCaptionNumber(m.min)}–${formatCaptionNumber(m.max)}</span>`
         : nothing}
-      ${this.display === 'summary' && this.showHistory ? html`<div class="stats">
+      ${this.display === 'summary' ? html`<div class="stats">
         ${stat('Min', stats?.min ?? null)}
         ${stat('Avg', stats?.mean ?? null)}
         ${stat('Max', stats?.max ?? null)}

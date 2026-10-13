@@ -4,12 +4,11 @@ import type { HomeAssistant } from 'custom-card-helpers';
 import { CARD_NAME, CARD_DISPLAY_NAME, CARD_DESCRIPTION, CARD_VERSION } from './const';
 import { DEFAULT_GAUGES, type MaterialPlantCardConfig, type PlantInfo } from './types';
 import { buildMeasurements, activeProblems, toneFor, formatValue, describeMeasurement, tooltipLines, batteryInfo } from './calc/measurements';
-import { configForm } from './config-form';
 import { themeTokens } from './theme';
 import './gauge/plant-gauge';
 import './battery/battery-glyph';
 import { fetchHistory, summarizeHourly, summarizeDailyMax, seriesExtremes, localDayStart, type HistoryFetch, type RawHistory, type MetricHistory } from './data/history-stats';
-import { resolveMetric, periodStart } from './calc/metric-settings';
+import { normalizeMetrics, resolveMetric, periodStart } from './calc/metric-settings';
 import { isDaylight, sunEvents } from './calc/sun';
 import { describeWithStats } from './full/metric-row';
 
@@ -280,9 +279,10 @@ export class MaterialPlantCard extends LitElement {
     let days = 1;
     const settings: unknown[] = [];
     if (this.hass && this._config && this.hass.states[this._config.entity]) {
-      for (const m of buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states)) {
+      const metrics = normalizeMetrics(this._config);
+      for (const m of buildMeasurements(this._info, metrics.map(entry => entry.type), this.hass.states)) {
         if (!m.sensor) continue;
-        const r = resolveMetric(this._config, m.key);
+        const r = resolveMetric(metrics.find(entry => entry.type === m.key)!);
         const daily = this._isCumulative(m.sensor);
         if (daily) {
           cumulative.add(m.sensor);
@@ -332,7 +332,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   private _syncStats(): void {
-    if (this._config?.display_type === 'compact' || this._config?.hide_history) {
+    if (this._config?.display_type === 'compact') {
       this._stopStats(true);
       return;
     }
@@ -405,11 +405,12 @@ export class MaterialPlantCard extends LitElement {
       throw new Error('Specify a plant entity');
     }
     const changedEntity = this._config?.entity !== config.entity;
-    this._config = { ...config, show_bars: config.show_bars ? [...config.show_bars] : undefined };
+    this._config = { ...config, show_bars: config.show_bars ? [...config.show_bars] : undefined,
+      metrics: normalizeMetrics(config).map(entry => ({ ...entry })) };
     this._dismissTooltip();
     this._statsRequest++;
     this._statsPending = true;
-    if (changedEntity || config.display_type === 'compact' || config.hide_history) this._stopStats(true);
+    if (changedEntity || config.display_type === 'compact') this._stopStats(true);
     if (changedEntity) {
       this._info = undefined;
       // Invalidate the old entity even when hass has not arrived yet.
@@ -422,18 +423,21 @@ export class MaterialPlantCard extends LitElement {
   public getCardSize(): number {
     if (this._config?.display_type === 'compact') return 4;
     const n = this.hass && this._config && this.hass.states[this._config.entity]
-      ? buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states).length : 0;
+      ? buildMeasurements(this._info, normalizeMetrics(this._config).map(entry => entry.type), this.hass.states).length : 0;
     return Math.ceil((100 + n * 86) / 50);
   }
   public getGridOptions(): { columns: number; min_columns: number; rows: 'auto' } {
     return { columns: 6, min_columns: 4, rows: 'auto' };
   }
-  public static getConfigForm(): typeof configForm { return configForm; }
+  public static async getConfigElement() {
+    await import('./editor');
+    return document.createElement('material-plant-card-editor');
+  }
   public static getStubConfig(hass: HomeAssistant): MaterialPlantCardConfig {
     return {
       type: `custom:${CARD_NAME}`,
       entity: Object.keys(hass.states).find((id) => id.startsWith('plant.')) ?? 'plant.my_plant',
-      show_bars: [...DEFAULT_GAUGES],
+      metrics: DEFAULT_GAUGES.map(type => ({ type })),
     };
   }
 
@@ -547,7 +551,7 @@ export class MaterialPlantCard extends LitElement {
     const ids = new Set([this._config.entity]);
     if (this._config.battery_sensor) ids.add(this._config.battery_sensor);
     // Track configured metadata sensors even when absent, so a newly added sensor renders.
-    for (const key of this._config.show_bars ?? DEFAULT_GAUGES) {
+    for (const { type: key } of normalizeMetrics(this._config)) {
       const sensor = this._info?.[key]?.sensor;
       if (sensor) ids.add(sensor);
     }
@@ -568,8 +572,9 @@ export class MaterialPlantCard extends LitElement {
     if (!plant) return html`<ha-card><div class="warning">Entity not available: ${cfg.entity}</div></ha-card>`;
     const compact = cfg.display_type === 'compact';
     const hideUnits = cfg.hide_units ?? false;
-    const iconOverrides = Object.fromEntries(Object.keys(cfg.metrics ?? {}).map((key) => [key, resolveMetric(cfg, key).icon ?? '']));
-    const measurements = buildMeasurements(this._info, cfg.show_bars ?? DEFAULT_GAUGES, this.hass.states, iconOverrides);
+    const metrics = normalizeMetrics(cfg);
+    const iconOverrides = Object.fromEntries(metrics.map(entry => [entry.type, resolveMetric(entry).icon ?? '']));
+    const measurements = buildMeasurements(this._info, metrics.map(entry => entry.type), this.hass.states, iconOverrides);
     const tooltipIndex = this._tooltip ? Array.from(this.shadowRoot!.querySelectorAll('.gauge-btn')).indexOf(this._tooltip) : -1;
     const tooltipMeasurement = measurements[tooltipIndex];
     const tooltipText = tooltipMeasurement ? tooltipLines(tooltipMeasurement) : undefined;
@@ -616,7 +621,7 @@ export class MaterialPlantCard extends LitElement {
             </button>` : nothing}
         </div>
         ${!compact && measurements.length ? html`<div class="tiles">${measurements.map((m) => {
-          const r = resolveMetric(cfg, m.key);
+          const r = resolveMetric(metrics.find(entry => entry.type === m.key)!);
           const now = Date.now();
           const cumulative = this._isCumulative(m.sensor);
           const lat = this.hass!.config?.latitude;
@@ -630,7 +635,7 @@ export class MaterialPlantCard extends LitElement {
           const keep = daylight ? (start: number, end: number) => isDaylight(start, end, lat!, lon!, r.daylightOffset) : undefined;
           const daylightNow = !keep || keep(now, now);
           const useFine = daylight && r.periodMs <= 7 * 86400000;
-          const filtered: MetricHistory | null = cfg.hide_history ? null : cumulative
+          const filtered: MetricHistory = cumulative
             ? summarizeDailyMax(m.sensor ? this._statsMap.cumulative[m.sensor] : undefined, { days: r.days, now, current: m.value, timeZone: tz })
             : summarizeHourly(m.sensor ? (useFine ? this._statsMap.fine : this._statsMap.hourly)[m.sensor] : undefined,
               { start, now, current: daylightNow ? m.value : null, keep });
@@ -664,7 +669,7 @@ export class MaterialPlantCard extends LitElement {
             <mpl-metric-row .measurement=${m} .tone=${tone} .display=${r.display} .history=${history} .events=${events}
               .graphStart=${cumulative ? undefined : start} .graphEnd=${cumulative ? undefined : now}
               .periodLabel=${periodLabel} .periodText=${periodText} .daily=${cumulative && r.days > 1}
-              .locale=${this.hass!.locale?.language ?? this.hass!.language} .timeZone=${tz} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
+               .locale=${this.hass!.locale?.language ?? this.hass!.language} .timeZone=${tz} .hideUnits=${hideUnits}></mpl-metric-row>
           </div>`;
         })}</div>` : nothing}
         ${compact && measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
