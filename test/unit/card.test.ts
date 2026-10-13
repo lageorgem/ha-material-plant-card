@@ -28,13 +28,13 @@ function fakeHass(data: PlantInfo = info) {
   const callWS = sinon.stub().callsFake(async (msg: Record<string, unknown>) => {
     if (msg.type === 'plant/get_info') return { result: data };
     if (msg.type === 'recorder/statistics_during_period') {
-      return Object.fromEntries((msg.statistic_ids as string[]).map((id) => [id, (msg.types as string[]).includes('state')
+      return Object.fromEntries((msg.statistic_ids as string[]).map((id) => [id, msg.period === 'hour' && (msg.types as string[]).includes('state')
         ? [8, 12, 0.7].flatMap((value, index) => [
           { start: localDayStart(Date.now(), 2 - index), end: localDayStart(Date.now(), 2 - index) + 3600000, state: 0 },
           { start: localDayStart(Date.now(), 2 - index) + 3600000,
             end: localDayStart(Date.now(), 2 - index) + 7200000, state: value },
         ])
-        : [{ start: Date.now() - 3600000, end: Date.now(), min: 15, max: 35, mean: 25 }]]));
+         : [{ start: Date.now() - (msg.period === '5minute' ? 300000 : 3600000), end: Date.now(), min: 15, max: 35, mean: 25 }]]));
     }
     throw new Error(`Unexpected WebSocket request: ${String(msg.type)}`);
   });
@@ -85,12 +85,128 @@ describe('material-plant-card', () => {
       return hass;
     };
 
-    it('passes sunrise and sunset icons for 24h illuminance independently of daylight filtering', async () => {
+    it('defaults to Today and fetches from HA local midnight, retaining explicit 24h', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      hass.config.time_zone = 'Pacific/Kiritimati';
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
+      expect(rows(card)[0].periodLabel).to.equal('Today');
+      expect(rows(card)[0].periodText).to.equal('today');
+      expect(calls(hass)[0].args[0].start_time).to.equal('2026-01-15T10:00:00.000Z');
+      card.setConfig(full({ show_bars: ['moisture'], history_period: '24h' }));
+      await clock.tickAsync(60000);
+      await settle(card);
+      expect(rows(card)[0].periodLabel).to.equal('Last 24 h');
+      expect(calls(hass)[1].args[0].start_time).to.equal(new Date(Date.now() - 86400000).toISOString());
+      card.remove();
+    });
+
+    for (const display of ['summary', 'graph'] as const) {
+      it(`uses five-minute golden-hour extrema with an unfiltered ${display} graph source`, async () => {
+        const clock = clockForStats();
+        clock.setSystemTime(Date.UTC(2026, 0, 15, 22));
+        const hass = illuminanceHass();
+        hass.config.time_zone = 'UTC';
+        const start = localDayStart(Date.now(), 0, 'UTC');
+        const sunrise = sunEvents(start, Date.now(), hass.config.latitude, hass.config.longitude)[0].t;
+        const boundary = sunrise + 30 * 60000;
+        const fine = [
+          { start: boundary - 300000, end: boundary, min: 1, max: 90000, mean: 50000 },
+          { start: boundary, end: boundary + 300000, min: 2000, max: 4000, mean: 3000 },
+        ];
+        const night = Date.UTC(2026, 0, 15, 20);
+        hass.callWS.callsFake(async (msg: Record<string, unknown>) => {
+          if (msg.type === 'plant/get_info') return { result: { ...info,
+            illuminance: { min: 2000, max: 30000, sensor: 'sensor.illuminance', unit_of_measurement: 'lx' } } };
+          return { 'sensor.illuminance': msg.period === '5minute' ? fine : [
+            { start: night, end: night + 3600000, min: 0, max: 0, mean: 0 },
+          ] };
+        });
+        const card = await mount(full({ show_bars: ['illuminance'], full_display: display }), hass);
+        const row = rows(card)[0];
+        expect(row.history?.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
+        expect(row.history?.minPoint).to.deep.equal({ t: boundary + 150000, v: 2000 });
+        expect(row.history?.maxPoint).to.deep.equal({ t: boundary + 150000, v: 4000 });
+        expect(row.events[0].t).to.equal(boundary);
+        expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(display === 'graph' ? ['hour', '5minute'] : ['5minute']);
+        expect(calls(hass).find(call => call.args[0].period === '5minute')!.args[0].start_time).to.equal(new Date(start).toISOString());
+        if (display === 'graph') expect(row.history?.series).to.deep.equal([
+          { t: night + 1800000, v: 0 }, { t: Date.now(), v: 0 },
+        ]);
+        card.remove();
+      });
+    }
+
+    it('uses filtered hourly summaries for 14d without fine rows or solar events', async () => {
+      const clock = clockForStats();
+      clock.setSystemTime(Date.UTC(2026, 0, 15, 22));
+      const hass = illuminanceHass();
+      const day = Date.UTC(2026, 0, 15, 11);
+      const night = Date.UTC(2026, 0, 15, 20);
+      hass.callWS.onSecondCall().resolves({ 'sensor.illuminance': [
+        { start: day, end: day + 3600000, min: 2000, max: 4000, mean: 3000 },
+        { start: night, end: night + 3600000, min: 0, max: 90000, mean: 10000 },
+      ] });
+      const card = await mount(full({ show_bars: ['illuminance'], history_period: '14d', full_display: 'graph' }), hass);
+      expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(['hour']);
+      expect(rows(card)[0].history?.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
+      expect(rows(card)[0].history?.series.map(point => point.v)).to.deep.equal([3000, 10000, 0]);
+      expect(rows(card)[0].events).to.deep.equal([]);
+      card.remove();
+    });
+
+    it('refetches fine/hourly groups for display, coordinates, timezone and period changes', async () => {
+      const clock = clockForStats();
+      const hass = illuminanceHass();
+      const config = full({ show_bars: ['illuminance'] });
+      const card = await mount(config, hass);
+      expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(['5minute']);
+      card.setConfig({ ...config, full_display: 'graph' });
+      await clock.tickAsync(60000);
+      await settle(card);
+      expect(calls(hass).slice(1).map(call => call.args[0].period)).to.deep.equal(['hour', '5minute']);
+      for (const change of [{ latitude: 45 }, { longitude: 27 }, { time_zone: 'UTC' }]) {
+        assign(card, { ...hass, config: { ...hass.config, ...change } });
+        await settle(card);
+        const count = calls(hass).length;
+        await clock.tickAsync(60000);
+        await settle(card);
+        expect(calls(hass)).to.have.length(count + 2);
+      }
+      card.setConfig({ ...config, history_period: '14d' });
+      await clock.tickAsync(60000);
+      await settle(card);
+      expect(calls(hass)[calls(hass).length - 1].args[0].period).to.equal('hour');
+      card.remove();
+    });
+
+    it('preserves fine summaries when their refresh fails while updating the hourly graph', async () => {
+      const clock = clockForStats();
+      const hass = illuminanceHass('3000');
+      let failFine = false;
+      hass.callWS.callsFake(async (msg: Record<string, unknown>) => {
+        if (msg.type === 'plant/get_info') return { result: { ...info,
+          illuminance: { min: 2000, max: 30000, sensor: 'sensor.illuminance', unit_of_measurement: 'lx' } } };
+        if (msg.period === '5minute' && failFine) throw new Error('fine offline');
+        return { 'sensor.illuminance': [{ start: Date.now() - 300000, end: Date.now(),
+          min: 2000, max: failFine ? 90000 : 4000, mean: failFine ? 50000 : 3000 }] };
+      });
+      const card = await mount(full({ show_bars: ['illuminance'], full_display: 'graph' }), hass);
+      failFine = true;
+      await clock.tickAsync(600000);
+      await settle(card);
+      expect(rows(card)[0].history?.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
+      expect(rows(card)[0].history?.series[0].v).to.equal(50000);
+      expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(['hour', '5minute', 'hour', '5minute']);
+      card.remove();
+    });
+
+    it('passes golden-hour cutoff icons only for filtered illuminance windows up to three days', async () => {
       clockForStats();
       const hass = illuminanceHass();
       const config = full({ show_bars: ['illuminance'], full_display: 'graph', history_period: '24h' });
       const card = await mount(config, hass);
-      const expected = sunEvents(Date.now() - 86400000, Date.now(), hass.config.latitude, hass.config.longitude)
+      const expected = sunEvents(Date.now() - 86400000, Date.now(), hass.config.latitude, hass.config.longitude, 30)
         .map(event => ({ t: event.t, icon: event.kind === 'sunrise' ? 'mdi:weather-sunset-up' : 'mdi:weather-sunset-down' }));
       expect(expected).to.have.length(2);
       expect(expected.map(event => event.icon)).to.have.members(['mdi:weather-sunset-up', 'mdi:weather-sunset-down']);
@@ -99,7 +215,7 @@ describe('material-plant-card', () => {
       expect(rows(card)[0].shadowRoot!.querySelector('mpl-history-graph')!.events).to.deep.equal(expected);
       card.setConfig({ ...config, metrics: { illuminance: { daylight_only: false } } });
       await settle(card);
-      expect(rows(card)[0].events).to.deep.equal(expected);
+      expect(rows(card)[0].events).to.deep.equal([]);
       card.setConfig({ ...config, history_period: '3d' });
       await settle(card);
       expect(rows(card)[0].events).to.have.length(6);
@@ -124,7 +240,7 @@ describe('material-plant-card', () => {
       }
       assign(card, hass);
       await settle(card);
-      expect(rows(card)[0].events).to.have.length(2);
+      expect(rows(card)[0].events).to.have.length(1);
       card.remove();
     });
 
@@ -330,31 +446,33 @@ describe('material-plant-card', () => {
       const hass = illuminanceHass();
       hass.config.latitude = NaN;
       const card = await mount(full({ show_bars: ['illuminance'] }), hass);
-      expect(rows(card)[0].periodLabel).to.equal('Last 24 h');
+      expect(rows(card)[0].periodLabel).to.equal('Today');
       expect(rows(card)[0].history?.stats).to.deep.equal({ min: 0, max: 35, mean: 25 });
       expect(rows(card)[0].tone).to.equal('problem');
       card.remove();
     });
 
-    it('filters hourly illuminance by sunlight, retains gaps, and counts current by day', async () => {
+    it('filters five-minute illuminance by sunlight and counts current by day', async () => {
       clockForStats();
       const hass = illuminanceHass();
       const card = await mount(full({ show_bars: ['moisture', 'illuminance'] }), hass);
       await settle(card);
-      expect(calls(hass)).to.have.length(1);
+      expect(calls(hass)).to.have.length(2);
       expect(calls(hass)[0].args[0].period).to.equal('hour');
-      expect(calls(hass)[0].args[0].statistic_ids).to.deep.equal(['sensor.moisture', 'sensor.illuminance']);
+      expect(calls(hass)[0].args[0].statistic_ids).to.deep.equal(['sensor.moisture']);
+      expect(calls(hass)[1].args[0].period).to.equal('5minute');
+      expect(calls(hass)[1].args[0].statistic_ids).to.deep.equal(['sensor.illuminance']);
       expect(daytimeCalls(hass)).to.have.length(0);
       const row = rows(card)[1];
       expect(row.history?.stats).to.deep.equal({ min: 0, max: 35, mean: 25 });
       expect(row.measurement.value).to.equal(0);
       expect(row.tone).to.equal('problem');
-      expect(row.periodLabel).to.equal('Daylight · 24 h');
+      expect(row.periodLabel).to.equal('Daylight · today');
       const button = card.shadowRoot!.querySelectorAll('.tile')[1];
       expect(button.classList.contains('problem')).to.equal(false);
-      expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.history?.stats ?? null, 'daylight, last 24 h'));
+      expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.history?.stats ?? null, 'daylight, today'));
       await row.updateComplete;
-      expect(row.shadowRoot!.textContent).to.include('Daylight · 24 h');
+      expect(row.shadowRoot!.textContent).to.include('Daylight · today');
       card.remove();
     });
 
@@ -384,6 +502,7 @@ describe('material-plant-card', () => {
     });
 
     it('uses plain hourly history and zero error tone when daylight filtering is disabled', async () => {
+      clockForStats();
       const hass = illuminanceHass();
       const card = await mount(full({ show_bars: ['illuminance'], metrics: { illuminance: { daylight_only: false } } }), hass);
       await settle(card);
@@ -391,11 +510,12 @@ describe('material-plant-card', () => {
       expect(calls(hass)).to.have.length(1);
       expect(calls(hass)[0].args[0].period).to.equal('hour');
       expect(calls(hass)[0].args[0].statistic_ids).to.deep.equal(['sensor.illuminance']);
+      expect(rows(card)[0].events).to.deep.equal([]);
       const row = rows(card)[0];
       expect(row.history?.stats).to.deep.equal({ min: 0, max: 35, mean: 25 });
-      expect(row.periodLabel).to.equal('Last 24 h');
+      expect(row.periodLabel).to.equal('Today');
       expect(row.tone).to.equal('problem');
-      expect(query(card, '.tile').getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.history?.stats ?? null, 'last 24 h'));
+      expect(query(card, '.tile').getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.history?.stats ?? null, 'today'));
       card.remove();
     });
 
@@ -471,7 +591,7 @@ describe('material-plant-card', () => {
         expect(button.getAttribute('role')).to.equal('button');
         expect(button.tabIndex).to.equal(0);
         expect(button.getAttribute('aria-label')).to.equal(describeWithStats(row.measurement, row.history?.stats ?? null,
-          row.measurement.key === 'illuminance' ? 'daylight, last 24 h' : 'last 24 h'));
+          row.measurement.key === 'illuminance' ? 'daylight, today' : 'today'));
         expect(button.getBoundingClientRect().height).to.equal(84);
         const style = getComputedStyle(button);
         expect(style.padding).to.equal('8px 12px');
@@ -700,6 +820,7 @@ describe('material-plant-card', () => {
     });
 
     it('waits for info then fetches only rendered sensor ids once and extends stats with live values', async () => {
+      clockForStats();
       const hass = fakeHass();
       let resolve!: (value: { result: PlantInfo }) => void;
       hass.callWS.onFirstCall().returns(new Promise((done) => { resolve = done; }));
@@ -721,7 +842,7 @@ describe('material-plant-card', () => {
     it('refetches every ten minutes and keeps good history on error', async () => {
       const clock = clockForStats();
       const hass = fakeHass();
-      const card = await mount(full(), hass);
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
       await settle(card);
       expect(calls(hass)).to.have.length(1);
       hass.callWS.onCall(hass.callWS.callCount).rejects(new Error('offline'));
@@ -739,7 +860,7 @@ describe('material-plant-card', () => {
       const hass = fakeHass();
       let resolve!: (value: Record<string, { start: number; end: number; min: number; max: number; mean: number }[]>) => void;
       hass.callWS.onSecondCall().returns(new Promise((done) => { resolve = done; }));
-      const card = await mount(full(), hass);
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
       card.setConfig(full({ show_bars: ['temperature'] }));
       await settle(card);
       card.setConfig(full({ show_bars: ['moisture'] }));
@@ -810,7 +931,7 @@ describe('material-plant-card', () => {
     it('drops history and stops its timer when disabled or switched to compact', async () => {
       const clock = clockForStats();
       const hass = fakeHass();
-      const card = await mount(full(), hass);
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
       await settle(card);
       card.setConfig(full({ hide_history: true }));
       await settle(card);
@@ -827,7 +948,7 @@ describe('material-plant-card', () => {
     it('clears history timer on disconnect and refetches on reconnect after ten minutes', async () => {
       const clock = clockForStats();
       const hass = fakeHass();
-      const card = await mount(full(), hass);
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
       await settle(card);
       card.remove();
       expect(clock.countTimers()).to.equal(0);

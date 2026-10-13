@@ -9,7 +9,7 @@ import { themeTokens } from './theme';
 import './gauge/plant-gauge';
 import './battery/battery-glyph';
 import { fetchHistory, summarizeHourly, summarizeDailyMax, localDayStart, type HistoryFetch, type RawHistory, type MetricHistory } from './data/history-stats';
-import { resolveMetric, PERIOD_MS } from './calc/metric-settings';
+import { resolveMetric, periodStart } from './calc/metric-settings';
 import { isDaylight, sunEvents } from './calc/sun';
 import { describeWithStats } from './full/metric-row';
 
@@ -46,8 +46,8 @@ export class MaterialPlantCard extends LitElement {
   @state() private _failedSrc?: string;
   @state() private _gaugeCapacity = 6;
   @state() private _statsMap: RawHistory = {
-    hourly: {}, cumulative: {},
-    failedGroups: { hourly: false, cumulative: false },
+    hourly: {}, cumulative: {}, fine: {},
+    failedGroups: { hourly: false, cumulative: false, fine: false },
   };
   private _statsKey?: string;
   private _statsRequest = 0;
@@ -274,7 +274,9 @@ export class MaterialPlantCard extends LitElement {
     const tz = typeof this.hass?.config?.time_zone === 'string' ? this.hass.config.time_zone : undefined;
     const hourly = new Set<string>();
     const cumulative = new Set<string>();
-    let periodMs = 0;
+    const fine = new Set<string>();
+    let hourlyStart = now;
+    let fineStart = now;
     let days = 1;
     const settings: unknown[] = [];
     if (this.hass && this._config && this.hass.states[this._config.entity]) {
@@ -282,14 +284,30 @@ export class MaterialPlantCard extends LitElement {
         if (!m.sensor) continue;
         const r = resolveMetric(this._config, m.key);
         const daily = this._isCumulative(m.sensor);
-        (daily ? cumulative : hourly).add(m.sensor);
-        if (daily) days = Math.max(days, r.days);
-        else periodMs = Math.max(periodMs, PERIOD_MS[r.period]);
-        settings.push([m.key, m.sensor, daily, r.period, r.days, r.daylightOnly, r.daylightOffset]);
+        if (daily) {
+          cumulative.add(m.sensor);
+          days = Math.max(days, r.days);
+        } else {
+          const start = periodStart(r.period, now, tz);
+          hourlyStart = Math.min(hourlyStart, start);
+          const daylight = m.key === 'illuminance' && r.daylightOnly &&
+            Number.isFinite(this.hass.config?.latitude) && Number.isFinite(this.hass.config?.longitude);
+          const useFine = daylight && r.periodMs <= 7 * 86400000;
+          if (useFine) {
+            fine.add(m.sensor);
+            fineStart = Math.min(fineStart, start);
+          }
+          if (!useFine || r.display === 'graph') {
+            hourly.add(m.sensor);
+          }
+        }
+        settings.push([m.key, m.sensor, daily, r.period, r.days, r.daylightOnly, r.daylightOffset, r.display,
+          r.period === 'today' && !daily ? periodStart(r.period, now, tz) : null]);
       }
     }
     return {
-      fetch: { hourly: [...hourly], hourlyStart: now - periodMs, cumulative: [...cumulative], cumulativeStart: localDayStart(now, days - 1, tz) },
+      fetch: { hourly: [...hourly], hourlyStart, fine: [...fine], fineStart,
+        cumulative: [...cumulative], cumulativeStart: localDayStart(now, days - 1, tz) },
       key: JSON.stringify([this._config?.entity, settings, this.hass?.config?.latitude, this.hass?.config?.longitude, tz]),
     };
   }
@@ -303,10 +321,10 @@ export class MaterialPlantCard extends LitElement {
     if (dropMap) {
       this._statsKey = undefined;
       this._statsPending = true;
-      if (Object.keys(this._statsMap.hourly).length || Object.keys(this._statsMap.cumulative).length) {
+      if (Object.keys(this._statsMap.hourly).length || Object.keys(this._statsMap.cumulative).length || Object.keys(this._statsMap.fine).length) {
         this._statsMap = {
-          hourly: {}, cumulative: {},
-          failedGroups: { hourly: false, cumulative: false },
+          hourly: {}, cumulative: {}, fine: {},
+          failedGroups: { hourly: false, cumulative: false, fine: false },
         };
       }
     }
@@ -324,7 +342,7 @@ export class MaterialPlantCard extends LitElement {
       this._statsRequest++;
       this._statsPending = true;
     }
-    if (!sensors.hourly.length && !sensors.cumulative.length) {
+    if (!sensors.hourly.length && !sensors.cumulative.length && !sensors.fine.length) {
       clearTimeout(this._statsTimer);
       this._statsTimer = undefined;
       return;
@@ -356,6 +374,7 @@ export class MaterialPlantCard extends LitElement {
         ...result,
         hourly: result.failedGroups.hourly ? this._statsMap.hourly : result.hourly,
         cumulative: result.failedGroups.cumulative ? this._statsMap.cumulative : result.cumulative,
+        fine: result.failedGroups.fine ? this._statsMap.fine : result.fine,
       };
     }
     if (this._statsInFlight === request) this._statsInFlight = undefined;
@@ -601,25 +620,31 @@ export class MaterialPlantCard extends LitElement {
           const cumulative = this._isCumulative(m.sensor);
           const lat = this.hass!.config?.latitude;
           const lon = this.hass!.config?.longitude;
-          const events = m.key === 'illuminance' && !cumulative && Number.isFinite(lat) && Number.isFinite(lon) && r.periodMs <= 3 * 86400000
-            ? sunEvents(now - r.periodMs, now, lat!, lon!).map(event => ({
+          const start = periodStart(r.period, now, tz);
+          const daylight = m.key === 'illuminance' && !cumulative && r.daylightOnly && Number.isFinite(lat) && Number.isFinite(lon);
+          const events = daylight && now - start <= 3 * 86400000
+            ? sunEvents(start, now, lat!, lon!, r.daylightOffset).map(event => ({
               t: event.t, icon: event.kind === 'sunrise' ? 'mdi:weather-sunset-up' : 'mdi:weather-sunset-down',
             })) : [];
-          const daylight = !cumulative && r.daylightOnly && Number.isFinite(lat) && Number.isFinite(lon);
           const keep = daylight ? (start: number, end: number) => isDaylight(start, end, lat!, lon!, r.daylightOffset) : undefined;
           const daylightNow = !keep || keep(now, now);
-          const history: MetricHistory | null = cfg.hide_history ? null : cumulative
+          const useFine = daylight && r.periodMs <= 7 * 86400000;
+          const filtered: MetricHistory | null = cfg.hide_history ? null : cumulative
             ? summarizeDailyMax(m.sensor ? this._statsMap.cumulative[m.sensor] : undefined, { days: r.days, now, current: m.value, timeZone: tz })
-            : summarizeHourly(m.sensor ? this._statsMap.hourly[m.sensor] : undefined,
-              { start: now - r.periodMs, now, current: daylightNow ? m.value : null, keep });
+            : summarizeHourly(m.sensor ? (useFine ? this._statsMap.fine : this._statsMap.hourly)[m.sensor] : undefined,
+              { start, now, current: daylightNow ? m.value : null, keep });
+          const history = filtered && daylight && r.display === 'graph' ? {
+            ...summarizeHourly(m.sensor ? this._statsMap.hourly[m.sensor] : undefined, { start, now, current: m.value }),
+            minPoint: filtered.minPoint, maxPoint: filtered.maxPoint, stats: filtered.stats,
+          } : filtered;
           const problemTone = toneFor(m, problems);
           const tone = !cumulative && daylightNow && (m.status === 'low' || m.status === 'high') ? 'problem' : problemTone;
           const short = r.period === '24h' ? '24 h' : `${parseInt(r.period)} d`;
           const long = r.period === '24h' ? '24 h' : `${parseInt(r.period)} days`;
           const periodLabel = cumulative ? r.days === 1 ? 'Today' : `Daily max · ${r.days} d`
-            : `${daylight ? 'Daylight ·' : 'Last'} ${short}`;
+            : r.period === 'today' ? daylight ? 'Daylight · today' : 'Today' : `${daylight ? 'Daylight ·' : 'Last'} ${short}`;
           const periodText = cumulative ? r.days === 1 ? 'today' : `daily maximum, last ${r.days} days`
-            : `${daylight ? 'daylight, ' : ''}last ${long}`;
+            : `${daylight ? 'daylight, ' : ''}${r.period === 'today' ? 'today' : `last ${long}`}`;
           return html`<div class=${`tile${problemTone === 'problem' ? ' problem' : ''}`} role="button" tabindex="0" aria-label=${describeWithStats(m, history?.stats ?? null, periodText)}
             @pointerover=${this._tilePointerOver} @pointerout=${this._tilePointerOut} @pointerleave=${this._tilePointerLeave}
             @pointerdown=${{ handleEvent: (event: PointerEvent) => this._tilePointerDown(event), capture: true }}
