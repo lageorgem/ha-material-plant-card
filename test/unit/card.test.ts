@@ -72,6 +72,30 @@ const gauges = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAl
 describe('material-plant-card', () => {
   afterEach(() => sinon.restore());
 
+  for (const hideImage of [false, true]) {
+    it(`pads the header state layer without moving text or escaping the card (hide_image=${hideImage})`, async () => {
+      const card = await mount(cfg({ hide_image: hideImage }));
+      card.style.width = '327px';
+      await settleLayout(card);
+      const button = query(card, '.text-btn');
+      const style = getComputedStyle(button);
+      expect(style.paddingTop).to.equal('6px');
+      expect(style.paddingBottom).to.equal('6px');
+      expect(style.paddingLeft).to.equal('12px');
+      expect(style.paddingRight).to.equal('12px');
+      const surface = query(card, 'ha-card').getBoundingClientRect();
+      const name = query(card, '.name').getBoundingClientRect();
+      const expectedLeft = hideImage ? surface.left + 16 : query(card, '.image-btn').getBoundingClientRect().right + 12;
+      expect(name.left).to.be.closeTo(expectedLeft, 0.5);
+      expect(button.getBoundingClientRect().left).to.be.at.least(surface.left);
+      expect(button.getBoundingClientRect().right).to.be.at.most(surface.right);
+      expect(style.minWidth).to.equal('0px');
+      expect(getComputedStyle(query(card, '.name')).textOverflow).to.equal('ellipsis');
+      expect(query(card, '.header').getBoundingClientRect().height).to.equal(hideImage ? 44 : 56);
+      card.remove();
+    });
+  }
+
   describe('full metric tiles and history', () => {
     const full = (overrides: Partial<MaterialPlantCardConfig> = {}) => cfg({ display_type: undefined, ...overrides });
     const rows = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAll<MplMetricRow>('mpl-metric-row')];
@@ -512,28 +536,31 @@ describe('material-plant-card', () => {
       const pointer = (element: Element, type: string, pointerType = 'mouse') =>
         element.dispatchEvent(new PointerEvent(type, { pointerType, pointerId: 1, bubbles: true, composed: true }));
       // Synthetic pointer events do not set :hover. Mirror the production selector
-      // with a test class to verify its computed background without browser input.
+      // with a test class and hover-capable media to verify the overlay without browser input.
       const style = document.createElement('style');
-      style.textContent = MaterialPlantCard.styles.map((sheet) => sheet.cssText).join('\n').replaceAll(':hover', '.test-hover');
+      style.textContent = MaterialPlantCard.styles.map((sheet) => sheet.cssText).join('\n').replaceAll(':hover', '.test-hover')
+        .replaceAll('@media (hover: hover)', '@media all')
+        + '\n.tile::after { transition: none !important; }';
       card.shadowRoot!.append(style);
-      const background = getComputedStyle(tile).backgroundColor;
+      const background = getComputedStyle(tile, '::after').opacity;
       tile.classList.add('test-hover');
-      const hoverBackground = getComputedStyle(tile).backgroundColor;
-      expect(hoverBackground).not.to.equal(background);
+      const hoverBackground = getComputedStyle(tile, '::after').opacity;
+      expect(background).to.equal('0');
+      expect(hoverBackground).to.equal('0.08');
       pointer(target, 'pointerover');
       expect(tile.classList.contains('graph-active')).to.equal(true);
-      expect(getComputedStyle(tile).backgroundColor).to.equal(background);
+      expect(getComputedStyle(tile, '::after').opacity).to.equal(background);
       pointer(target, 'pointerout');
       pointer(row.shadowRoot!.querySelector('.title')!, 'pointerover');
       expect(tile.classList.contains('graph-active')).to.equal(false);
-      expect(getComputedStyle(tile).backgroundColor).to.equal(hoverBackground);
+      expect(getComputedStyle(tile, '::after').opacity).to.equal(hoverBackground);
       pointer(target, 'pointerover');
       pointer(tile, 'pointerleave');
       expect(tile.classList.contains('graph-active')).to.equal(false);
       for (const release of ['pointerup', 'pointercancel']) {
         pointer(target, 'pointerdown', 'touch');
         expect(tile.classList.contains('graph-active')).to.equal(true);
-        expect(getComputedStyle(tile).backgroundColor).to.equal(background);
+        expect(getComputedStyle(tile, '::after').opacity).to.equal(background);
         window.dispatchEvent(new PointerEvent(release, { pointerType: 'touch', pointerId: 1 }));
         expect(tile.classList.contains('graph-active')).to.equal(false);
       }
@@ -541,9 +568,35 @@ describe('material-plant-card', () => {
       pointer(target, 'pointerdown');
       pointer(target, 'pointerup');
       expect(tile.classList.contains('graph-active')).to.equal(true);
-      expect(getComputedStyle(tile).backgroundColor).to.equal(background);
+      expect(getComputedStyle(tile, '::after').opacity).to.equal(background);
       card.remove();
       expect(tile.classList.contains('graph-active')).to.equal(false);
+    });
+
+    it('layers hover and press above a problem gradient without changing its background', async () => {
+      const hass = fakeHass();
+      hass.states[ENTITY] = state('problem', { problems: [{ sensor_type: 'moisture', status: 'Low' }] });
+      hass.states['sensor.moisture'] = state('5');
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
+      const tile = query(card, '.tile.problem');
+      expect(tile).to.exist;
+      const style = document.createElement('style');
+      style.textContent = MaterialPlantCard.styles.map(sheet => sheet.cssText).join('\n')
+        .replaceAll(':hover', '.test-hover').replaceAll(':active', '.test-active')
+        .replaceAll('@media (hover: hover)', '@media all')
+        + '\n.tile::after { transition: none !important; }';
+      card.shadowRoot!.append(style);
+      const gradient = getComputedStyle(tile).backgroundImage;
+      expect(gradient).to.contain('linear-gradient');
+      tile.classList.add('test-hover');
+      expect(getComputedStyle(tile, '::after').opacity).to.equal('0.08');
+      expect(getComputedStyle(tile, '::after').pointerEvents).to.equal('none');
+      expect(getComputedStyle(tile).backgroundImage).to.equal(gradient);
+      tile.classList.add('test-active');
+      expect(getComputedStyle(tile, '::after').opacity).to.equal('0.12');
+      tile.classList.add('graph-active');
+      expect(getComputedStyle(tile, '::after').opacity).to.equal('0');
+      card.remove();
     });
 
     it('applies the daylight offset and refetches changed daylight settings after throttling', async () => {
