@@ -1,6 +1,7 @@
 export interface GraphTick {
   f: number;
   label: string;
+  kind: 'min' | 'avg' | 'max';
 }
 
 export interface GraphScale {
@@ -21,18 +22,16 @@ export function niceStep(span: number, targetTicks: number): number {
   return magnitude * 10;
 }
 
-function stepDecimals(step: number): number {
-  const exponent = Math.floor(Math.log10(step) + 1e-9);
-  const leading = step / 10 ** exponent;
-  return Math.max(0, -exponent + (Math.abs(leading - 2.5) < 1e-9 ? 1 : 0));
+function spacingDecimals(spacing: number): number {
+  return Math.max(0, -Math.floor(Math.log10(spacing) + 1e-9));
 }
 
-function tickLabel(value: number, step: number): string {
+function tickLabel(value: number, span: number, extraDecimals = 0): string {
   if (value === 0) return '0';
-  if (Math.abs(value) >= 1000 && step >= 100) {
-    return `${(value / 1000).toFixed(stepDecimals(step / 1000))}k`;
-  }
-  return value.toFixed(stepDecimals(step));
+  const compact = Math.abs(value) >= 1000 && span >= 400;
+  const divisor = compact ? 1000 : 1;
+  const label = (value / divisor).toFixed(spacingDecimals(span / divisor / 4) + extraDecimals);
+  return Number(label) === 0 && value < 0 ? '0' : `${label}${compact ? 'k' : ''}`;
 }
 
 export function graphScale(
@@ -42,28 +41,47 @@ export function graphScale(
 ): GraphScale {
   let lo0 = Infinity;
   let hi0 = -Infinity;
+  let count = 0;
   for (const value of values) {
     if (value === null || !Number.isFinite(value)) continue;
     lo0 = Math.min(lo0, value);
     hi0 = Math.max(hi0, value);
+    count++;
   }
   if (lo0 > hi0) return { map: () => null, ticks: [], thresholdLow: null, thresholdHigh: null };
-  if (hi0 - lo0 < 1e-9) {
+  let avg = 0;
+  for (const value of values) {
+    if (value !== null && Number.isFinite(value)) avg += value / count;
+  }
+  const flat = hi0 - lo0 < 1e-9;
+  const observedLow = lo0;
+  if (flat) {
     const pad = Math.max(Math.abs(lo0) * 0.05, 0.5);
     lo0 -= pad;
     hi0 += pad;
   }
-  const step = niceStep(hi0 - lo0, 2);
-  const lowMultiple = Math.floor(lo0 / step);
-  const highMultiple = Math.ceil(hi0 / step);
-  const lo = lowMultiple * step;
-  const hi = highMultiple * step;
+  const lo = lo0;
+  const hi = hi0;
+  const span = hi - lo;
   const map = (value: number | null): number | null =>
-    value === null || !Number.isFinite(value) ? null : (value - lo) / (hi - lo);
-  const ticks: GraphTick[] = [];
-  for (let multiple = lowMultiple; multiple <= highMultiple; multiple++) {
-    const value = multiple * step;
-    ticks.push({ f: map(value)!, label: tickLabel(value, step) });
+    value === null || !Number.isFinite(value) ? null : (value - lo) / span;
+  let ticks: GraphTick[];
+  if (flat) {
+    ticks = [{ f: 0.5, kind: 'avg', label: tickLabel(observedLow, span) }];
+  } else {
+    let labels = [lo, avg, hi].map(value => tickLabel(value, span));
+    for (let extra = 1; extra <= 3 && new Set(labels).size < 3; extra++) {
+      labels = [lo, avg, hi].map(value => tickLabel(value, span, extra));
+    }
+    const averageFraction = map(avg)!;
+    ticks = [
+      { f: 0, kind: 'min', label: labels[0] },
+      {
+        f: averageFraction, kind: 'avg',
+        label: Math.abs(averageFraction) < 0.22 || Math.abs(averageFraction - 1) < 0.22 ? '' : labels[1],
+      },
+      { f: 1, kind: 'max', label: labels[2] },
+    ];
   }
   const validIdeal = min !== null && max !== null && Number.isFinite(min) && Number.isFinite(max) && min < max;
   return {
