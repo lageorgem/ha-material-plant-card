@@ -13,6 +13,14 @@ export function graphScale(
   max: number | null,
   unit: string,
 ): GraphScale {
+  if (min === null || max === null || !Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
+    return {
+      mode: 'full',
+      map: () => null,
+      thresholdLow: null,
+      thresholdHigh: null,
+    };
+  }
   let lo = Infinity;
   let hi = -Infinity;
   for (const value of values) {
@@ -20,8 +28,7 @@ export function graphScale(
     lo = Math.min(lo, value);
     hi = Math.max(hi, value);
   }
-  const known = min !== null && max !== null;
-  if (known && lo <= hi) {
+  if (lo <= hi) {
     const below = hi <= min && lo < min;
     const above = lo >= max && hi > max;
     if (below || above) {
@@ -45,7 +52,7 @@ export function graphScale(
   return {
     mode: 'full',
     map: value => gaugeFraction(value, min, max, unit),
-    thresholdLow: known ? 0.2 : null,
-    thresholdHigh: known ? 0.8 : null,
+    thresholdLow: 0.2,
+    thresholdHigh: 0.8,
   };
 }

@@ -90,14 +90,31 @@ describe('graphScale', () => {
     }
   });
 
+  for (const [min, max] of [[6, 6], [13, 6], [NaN, 13], [6, NaN], [Infinity, 13], [6, Infinity], [-Infinity, 13], [6, -Infinity]]) {
+    it(`uses unknown-range mapping for invalid bounds ${min}, ${max}`, () => {
+      for (const values of [[1, 2], [20, 21], [1, 20]]) {
+        for (const unit of ['', 'lx']) {
+          const scale = graphScale(values, min, max, unit);
+          expect(scale.mode).to.equal('full');
+          expect(scale.thresholdLow).to.equal(null);
+          expect(scale.thresholdHigh).to.equal(null);
+          for (const value of [...values, null, 0, 6, 13, NaN, Infinity, -Infinity]) {
+            expect(scale.map(value)).to.equal(null);
+          }
+        }
+      }
+    });
+  }
+
   it('uses full mode with unknown thresholds when either bound is null', () => {
     for (const [min, max] of [[null, 13], [6, null], [null, null]]) {
       const scale = graphScale([1, 20], min, max, '');
       expect(scale.mode).to.equal('full');
       expect(scale.thresholdLow).to.equal(null);
       expect(scale.thresholdHigh).to.equal(null);
-      expect(scale.map(1)).to.equal(null);
-      expect(scale.map(null)).to.equal(null);
+      for (const value of [1, 20, null, NaN, Infinity, -Infinity]) {
+        expect(scale.map(value)).to.equal(null);
+      }
     }
   });
 });
