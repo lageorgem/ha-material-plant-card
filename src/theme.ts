@@ -28,5 +28,6 @@ export const themeTokens = css`
     --mpl-outline-variant: var(--md-sys-color-outline-variant, var(--divider-color, #cac4d0));
     --mpl-shape-card: var(--md-sys-shape-corner-extra-large, 28px);
     --mpl-shape-full: var(--md-sys-shape-corner-full, 9999px);
+    --mpl-ease-spatial: cubic-bezier(0.38, 1.21, 0.22, 1);
   }
 `;

@@ -338,7 +338,7 @@ export class MplHistoryGraph extends LitElement {
       animation: mpl-point-in 300ms cubic-bezier(0.2, 0, 0, 1) 300ms both;
     }
     .min-marker, .max-marker, .min-dot, .max-dot, .current-ring {
-      animation: mpl-mark-in 300ms var(--md-sys-motion-expressive-spatial-default, cubic-bezier(0.38, 1.21, 0.22, 1)) 700ms both;
+      animation: mpl-mark-in 300ms var(--mpl-ease-spatial, cubic-bezier(0.38, 1.21, 0.22, 1)) 700ms both;
       transform-box: fill-box;
       transform-origin: center;
     }

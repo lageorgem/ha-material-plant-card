@@ -211,6 +211,27 @@ describe('mpl-range-bar', () => {
   describe('motion preferences', () => {
     afterEach(async () => { await emulateMedia({ reducedMotion: null }); });
 
+    for (const motionToken of ['', '500ms cubic-bezier(0.38, 1.21, 0.22, 1)']) {
+      it(`preserves entry and transition timing with the theme motion token ${motionToken ? 'set' : 'unset'}`, async () => {
+        await emulateMedia({ reducedMotion: 'no-preference' });
+        const el = await mount();
+        el.parentElement!.style.setProperty('--md-sys-motion-expressive-spatial-default', motionToken);
+        for (const [selector, name, duration, delay] of [
+          ['.span', 'mpl-span-in', '0.6s', '0s'],
+          ['.dot', 'mpl-dot-in', '0.45s', '0.2s'],
+          ['.avg', 'mpl-avg-in', '0.35s', '0.35s'],
+        ]) {
+          const style = getComputedStyle(element(el, selector));
+          expect(style.animationName).to.equal(name);
+          expect(style.animationDuration).to.equal(duration);
+          expect(style.animationDelay).to.equal(delay);
+          expect(style.transitionProperty).to.equal('left, width');
+          expect(style.transitionDuration).to.equal('0.5s, 0.5s');
+          expect(style.transitionDelay).to.equal('0s, 0s');
+        }
+      });
+    }
+
     it('runs staggered entry animations on first mount', async () => {
       await emulateMedia({ reducedMotion: 'no-preference' });
       const el = await mount();

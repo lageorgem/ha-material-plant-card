@@ -49,6 +49,28 @@ function bubbleInside(el: MplHistoryGraph): void {
 }
 
 describe('mpl-history-graph', () => {
+  for (const motionToken of ['', '500ms cubic-bezier(0.38, 1.21, 0.22, 1)']) {
+    it(`preserves marker entry timing with the theme motion token ${motionToken ? 'set' : 'unset'}`, async () => {
+      await emulateMedia({ reducedMotion: 'no-preference' });
+      try {
+        const el = await mount();
+        el.parentElement!.style.setProperty('--md-sys-motion-expressive-spatial-default', motionToken);
+        el.minMarker = { t: 75, f: 0.1, ok: false };
+        el.maxMarker = { t: 0, f: 0.9, ok: false };
+        el.current = { t: 100, f: 0.6, tone: 'ok' };
+        await el.updateComplete;
+        const markers = [...el.shadowRoot!.querySelectorAll('.min-marker, .max-marker, .min-dot, .max-dot, .current-ring')];
+        expect(markers).to.have.length(5);
+        for (const marker of markers) {
+          const style = getComputedStyle(marker);
+          expect(style.animationName).to.equal('mpl-mark-in');
+          expect(style.animationDuration).to.equal('0.3s');
+          expect(style.animationDelay).to.equal('0.7s');
+        }
+      } finally { await emulateMedia({ reducedMotion: null }); }
+    });
+  }
+
   it('reserves a tick gutter and draws labelled gridlines below events and the series', async () => {
     const el = await mount();
     el.ticks = [
