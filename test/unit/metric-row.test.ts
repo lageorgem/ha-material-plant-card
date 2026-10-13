@@ -1,14 +1,17 @@
 import { expect, fixture, html } from '@open-wc/testing';
 import { describeWithStats, formatCaptionNumber, MplMetricRow } from '../../src/full/metric-row';
-import { describeMeasurement, gaugeFraction } from '../../src/calc/measurements';
+import { describeMeasurement, formatValue, gaugeFraction } from '../../src/calc/measurements';
 import type { GaugeTone, Measurement } from '../../src/types';
-import type { Stats24h } from '../../src/data/history-stats';
+import type { MetricHistory, Stats24h } from '../../src/data/history-stats';
 
 const moisture: Measurement = {
   key: 'moisture', label: 'Moisture', icon: 'mdi:water', unit: '%',
   value: 13, min: 15, max: 65, status: 'low', fraction: 0.99,
 };
 const stats: Stats24h = { min: 12, max: 31, mean: 22 };
+const withStats = (stats: Stats24h | null): MetricHistory => ({
+  stats, series: [], minPoint: null, maxPoint: null,
+});
 
 async function row(
   measurement = moisture,
@@ -18,7 +21,7 @@ async function row(
   showHistory = true,
 ): Promise<MplMetricRow> {
   return fixture<MplMetricRow>(html`
-    <mpl-metric-row .measurement=${measurement} .stats=${history}
+    <mpl-metric-row .measurement=${measurement} .history=${history ? withStats(history) : null}
       .tone=${tone} .hideUnits=${hideUnits} .showHistory=${showHistory}></mpl-metric-row>
   `);
 }
@@ -156,11 +159,11 @@ describe('mpl-metric-row', () => {
       expect(bar.showTicks).to.equal(true);
       expect(bar.tone).to.equal('problem');
       for (const mean of [measurement.min! - 1, measurement.max! + 1]) {
-        el.stats = { ...history, mean };
+        el.history = withStats({ ...history, mean });
         await el.updateComplete;
         expect(bar.avgOk).to.equal(false);
       }
-      el.stats = null;
+      el.history = null;
       el.tone = 'advisory';
       await el.updateComplete;
       expect(bar.spanFrom).to.equal(null);
@@ -170,7 +173,7 @@ describe('mpl-metric-row', () => {
       expect(bar.tone).to.equal('advisory');
       for (const bounds of [{ min: null }, { max: null }, { min: measurement.max }]) {
         el.measurement = { ...measurement, value: null, ...bounds };
-        el.stats = history;
+        el.history = withStats(history);
         await el.updateComplete;
         expect(bar.value).to.equal(null);
         expect(bar.spanFrom).to.equal(null);
@@ -187,7 +190,7 @@ describe('mpl-metric-row', () => {
       <div style="--mpl-success:#008000; --mpl-error:#ff0000;
         --mpl-error-container:#ffeeee; --mpl-on-error-container:#800000;
         --mpl-on-surface-variant:#444444; --mpl-on-surface:#111111">
-        <mpl-metric-row .measurement=${moisture} .stats=${{ min: 15, mean: 22, max: 70 }}></mpl-metric-row>
+        <mpl-metric-row .measurement=${moisture} .history=${withStats({ min: 15, mean: 22, max: 70 })}></mpl-metric-row>
       </div>
     `);
     const el = wrapper.querySelector('mpl-metric-row')!;
@@ -271,6 +274,121 @@ describe('mpl-metric-row', () => {
     expect(period.scrollWidth).to.be.at.most(period.clientWidth);
     expect(el.getBoundingClientRect().height).to.equal(68);
     expect(el.scrollWidth).to.equal(el.clientWidth);
+  });
+});
+
+describe('mpl-metric-row graph display', () => {
+  const start = new Date(2026, 9, 13, 10, 15).getTime();
+  const hour = 3600000;
+  const history: MetricHistory = {
+    stats,
+    series: [{ t: start, v: 12 }, { t: start + hour, v: null }, { t: start + 2 * hour, v: 31 }],
+    minPoint: { t: start, v: 12 }, maxPoint: { t: start + 2 * hour, v: 31 },
+  };
+  type GraphProps = {
+    points: { t: number; f: number | null; label: string }[];
+    start: number; end: number;
+    minMarker: { t: number; f: number; ok: boolean } | null;
+    maxMarker: { t: number; f: number; ok: boolean } | null;
+    current: { t: number; f: number; tone: GaugeTone } | null;
+    summary: string;
+  };
+  const graph = (el: MplMetricRow) => element(el, 'mpl-history-graph') as HTMLElement & GraphProps;
+  async function graphRow(measurement = moisture, data: MetricHistory | null = history) {
+    return fixture<MplMetricRow>(html`
+      <mpl-metric-row .measurement=${measurement} .history=${data}
+        display="graph" locale="en-GB" tone="problem"></mpl-metric-row>
+    `);
+  }
+
+  it('defaults to summary and replaces only the right column in graph mode', async () => {
+    const summary = await row();
+    expect(summary.display).to.equal('summary');
+    expect(summary.daily).to.equal(false);
+    expect(summary.periodText).to.equal('last 24 h');
+    expect(summary.shadowRoot!.querySelector('mpl-history-graph')).to.equal(null);
+    const el = await graphRow();
+    expect(el.shadowRoot!.querySelector('mpl-range-bar')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.stats')).to.equal(null);
+    expect(element(el, '.value').textContent!.trim()).to.equal('13%');
+    expect(element(el, '.ideal').textContent).to.equal('Ideal 15–65');
+    const style = getComputedStyle(graph(el));
+    expect(style.gridColumnStart).to.equal('2');
+    expect(style.gridRowStart).to.equal('2');
+    expect(style.gridRowEnd).to.equal('4');
+    expect(graph(el).getBoundingClientRect().height).to.equal(48);
+    expect(el.getBoundingClientRect().height).to.equal(68);
+    el.display = 'summary';
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('mpl-history-graph')).to.equal(null);
+    expect(badges(el)).to.have.length(3);
+  });
+
+  it('maps fractions, gaps, markers, last-point current and period summary', async () => {
+    for (const measurement of [moisture, { ...moisture, unit: 'lx', min: 10, max: 100 }]) {
+      const el = await graphRow(measurement);
+      el.periodText = 'daylight, last 3 days';
+      await el.updateComplete;
+      const props = graph(el);
+      const f = (v: number | null) => gaugeFraction(v, measurement.min, measurement.max, measurement.unit);
+      expect(props.start).to.equal(start);
+      expect(props.end).to.equal(start + 2 * hour);
+      expect(props.points.map(p => [p.t, p.f])).to.deep.equal(history.series.map(p => [p.t, f(p.v)]));
+      expect(props.minMarker).to.deep.equal({ t: start, f: f(12), ok: measurement.unit === 'lx' });
+      expect(props.maxMarker).to.deep.equal({ t: start + 2 * hour, f: f(31), ok: true });
+      expect(props.current).to.deep.equal({ t: start + 2 * hour, f: f(31), tone: 'problem' });
+      expect(props.summary).to.equal(describeWithStats(measurement, stats, el.periodText));
+      el.tone = 'advisory';
+      await el.updateComplete;
+      expect(props.current!.tone).to.equal('advisory');
+      el.history = { ...history, series: [...history.series, { t: start + 3 * hour, v: null }] };
+      await el.updateComplete;
+      expect(props.current).to.equal(null);
+    }
+  });
+
+  it('formats time by domain duration and daily dates, with compact DLI units', async () => {
+    const measurement = { ...moisture, unit: 'mol/d⋅m²', value: 0.04 };
+    const el = await graphRow(measurement);
+    for (const [duration, daily, options] of [
+      [24 * hour, false, { hour: '2-digit', minute: '2-digit' }],
+      [24 * hour + 1, false, { weekday: 'short', hour: '2-digit', minute: '2-digit' }],
+      [2 * hour, true, { weekday: 'short', day: 'numeric', month: 'short' }],
+    ] as const) {
+      el.daily = daily;
+      el.history = { ...history, series: [{ t: start, v: 0.04 }, { t: start + duration, v: null }] };
+      await el.updateComplete;
+      const formatter = new Intl.DateTimeFormat('en-GB', options);
+      expect(graph(el).points.map(p => p.label)).to.deep.equal([
+        `${formatter.format(start)} · ${formatValue(0.04, measurement.unit, true)} mol/d`,
+        `${formatter.format(start + duration)} · — mol/d`,
+      ]);
+    }
+    el.measurement = { ...moisture, unit: '' };
+    await el.updateComplete;
+    expect(graph(el).points[0].label).to.match(/ · 0\.04$/);
+  });
+
+  it('keeps empty graphs and omits unmappable markers and current', async () => {
+    for (const data of [null, withStats(null)]) {
+      const before = Date.now();
+      const el = await graphRow(moisture, data);
+      const after = Date.now();
+      const props = graph(el);
+      expect(props.points).to.deep.equal([]);
+      expect(props.start).to.be.within(before - 24 * hour, after - 24 * hour);
+      expect(props.end).to.be.within(before, after);
+      expect(props.minMarker).to.equal(null);
+      expect(props.maxMarker).to.equal(null);
+      expect(props.current).to.equal(null);
+      expect(props.summary).to.equal(describeMeasurement(moisture));
+      expect(el.getBoundingClientRect().height).to.equal(68);
+    }
+    const el = await graphRow({ ...moisture, min: null });
+    expect(graph(el).points.every(p => p.f === null)).to.equal(true);
+    expect(graph(el).minMarker).to.equal(null);
+    expect(graph(el).maxMarker).to.equal(null);
+    expect(graph(el).current).to.equal(null);
   });
 });
 

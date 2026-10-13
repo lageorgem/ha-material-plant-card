@@ -1,9 +1,10 @@
 import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { property } from 'lit/decorators.js';
 import { describeMeasurement, formatValue, gaugeFraction, gaugeStatus } from '../calc/measurements';
-import type { Stats24h } from '../data/history-stats';
-import type { GaugeTone, Measurement } from '../types';
+import type { MetricHistory, Stats24h } from '../data/history-stats';
+import type { FullDisplay, GaugeTone, Measurement } from '../types';
 import './range-bar';
+import './history-graph';
 
 const formatCaption = (value: number): string => formatValue(value, '', true);
 const displayUnits: Readonly<Record<string, string>> = {
@@ -34,7 +35,11 @@ export function describeWithStats(m: Measurement, stats: Stats24h | null, period
 export class MplMetricRow extends LitElement {
   @property({ attribute: false }) measurement!: Measurement;
   @property({ reflect: true }) tone: GaugeTone = 'unknown';
-  @property({ attribute: false }) stats: Stats24h | null = null;
+  @property({ attribute: false }) history: MetricHistory | null = null;
+  @property() display: FullDisplay = 'summary';
+  @property({ type: Boolean }) daily = false;
+  @property() periodText = 'last 24 h';
+  @property() locale?: string;
   @property({ type: Boolean, attribute: 'hide-units' }) hideUnits = false;
   @property({ type: Boolean, attribute: 'show-history' }) showHistory = true;
   @property({ type: String, attribute: 'period-label' }) periodLabel = 'Last 24 h';
@@ -42,7 +47,7 @@ export class MplMetricRow extends LitElement {
   protected render(): TemplateResult | typeof nothing {
     const m = this.measurement;
     if (!m) return nothing;
-    const stats = this.stats;
+    const stats = this.history?.stats ?? null;
     const fraction = (value: number | null): number | null =>
       gaugeFraction(value, m.min, m.max, m.unit);
     const avgStatus = gaugeStatus(stats?.mean ?? null, m.min, m.max);
@@ -51,6 +56,35 @@ export class MplMetricRow extends LitElement {
       return html`<span class=${status === 'low' || status === 'high' ? 'stat out' : 'stat'}>
         <span class="stat-label">${label}</span><span class="stat-value">${value === null ? '—' : formatCaptionNumber(value)}</span>
       </span>`;
+    };
+    const graph = (): TemplateResult => {
+      const series = this.history?.series ?? [];
+      const last = series[series.length - 1];
+      const end = last?.t ?? Date.now();
+      const start = series[0]?.t ?? end - 86400000;
+      const formatter = new Intl.DateTimeFormat(this.locale, this.daily
+        ? { weekday: 'short', day: 'numeric', month: 'short' }
+        : end - start <= 86400000
+          ? { hour: '2-digit', minute: '2-digit' }
+          : { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+      const displayUnit = displayUnits[m.unit] ?? m.unit;
+      const points = series.map(({ t, v }) => ({
+        t, f: fraction(v),
+        label: `${formatter.format(t)} · ${formatValue(v, m.unit, true)}${displayUnit ? ' ' + displayUnit : ''}`,
+      }));
+      const marker = (point: MetricHistory['minPoint']) => {
+        if (!point) return null;
+        const f = fraction(point.v);
+        return f === null ? null : { t: point.t, f, ok: gaugeStatus(point.v, m.min, m.max) === 'ok' };
+      };
+      const currentFraction = fraction(last?.v ?? null);
+      return html`<mpl-history-graph
+        .points=${points} .start=${start} .end=${end}
+        .minMarker=${marker(this.history?.minPoint ?? null)}
+        .maxMarker=${marker(this.history?.maxPoint ?? null)}
+        .current=${last && currentFraction !== null ? { t: last.t, f: currentFraction, tone: this.tone } : null}
+        .summary=${describeWithStats(m, stats, this.periodText)}
+      ></mpl-history-graph>`;
     };
 
     return html`
@@ -61,7 +95,7 @@ export class MplMetricRow extends LitElement {
       </div>
       <div class="value">${formatValue(m.value, m.unit, true)}${!this.hideUnits && m.unit !== ''
         ? html`<span class="unit">${displayUnits[m.unit] ?? m.unit}</span>` : nothing}</div>
-      <mpl-range-bar
+      ${this.display === 'graph' ? graph() : html`<mpl-range-bar
           .value=${fraction(m.value)}
           .tone=${this.tone}
           .spanFrom=${stats ? fraction(stats.min) : null}
@@ -69,11 +103,11 @@ export class MplMetricRow extends LitElement {
           .avg=${stats ? fraction(stats.mean) : null}
           .avgOk=${avgStatus === 'unknown' ? null : avgStatus === 'ok'}
           .showTicks=${m.min !== null && m.max !== null}
-      ></mpl-range-bar>
+      ></mpl-range-bar>`}
       ${m.min !== null && m.max !== null
         ? html`<span class="ideal">Ideal ${formatCaptionNumber(m.min)}–${formatCaptionNumber(m.max)}</span>`
         : nothing}
-      ${this.showHistory ? html`<div class="stats">
+      ${this.display === 'summary' && this.showHistory ? html`<div class="stats">
         ${stat('Min', stats?.min ?? null)}
         ${stat('Avg', stats?.mean ?? null)}
         ${stat('Max', stats?.max ?? null)}
@@ -183,6 +217,12 @@ export class MplMetricRow extends LitElement {
       grid-column: 2;
       grid-row: 2;
       min-width: 0;
+    }
+    mpl-history-graph {
+      grid-column: 2;
+      grid-row: 2 / 4;
+      min-width: 0;
+      height: calc(var(--mpl-metric-value-line) + var(--mpl-metric-caption-line));
     }
     .ideal {
       grid-column: 1;
