@@ -55,7 +55,7 @@ Full mode shows metric tiles with configurable history and DLI daily totals:
 
 Graph display replaces the summary scale and badges with interactive history:
 
-<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/graph-dark.png" alt="Full mode graphs: DLI below its ideal minimum in zoomed mode, min/max triangles and illuminance sunrise/sunset lines" width="327">
+<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/graph-dark.png" alt="Full mode graphs: threshold-coloured history, min/max triangles and illuminance sunrise/sunset lines" width="327">
 
 The dashboard above shows eleven plants in compact mode. This compact single-card view shows a plant needing attention:
 
@@ -126,7 +126,7 @@ Defaults apply when keys are omitted. Only `type` and `entity` are required; eve
 | `history_period` | string (`today`, `24h`, `3d`, `7d`, `14d` or `30d`), optional | `today` | Full only: default history window for non-cumulative measurements. `today` runs from midnight in Home Assistant's time zone to now. Each metric can override it with `period`; DLI uses `days` instead. Editor: Metrics → History window. | `7d` |
 | `full_display` | string (`summary` or `graph`), optional | `summary` | Default full-mode tile display; each metric can override it with `display`. | `graph` |
 | `metrics` | map of measurement keys to settings maps, optional | `{}` | Per-metric overrides; see [Per-metric settings](#per-metric-settings). | `{dli: {days: 14, display: graph}}` |
-| `hide_history` | boolean, optional | `false` | Full only: disables history fetching and hides history labels and summary statistics. Summary keeps the current-value scale; graph keeps empty ideal-bound guides. Current values and ideal ranges remain. | `true` |
+| `hide_history` | boolean, optional | `false` | Full only: disables history fetching and hides history labels and summary statistics. Summary keeps the current-value scale; graph has no history line. Current values and ideal ranges remain. | `true` |
 | `image` | string, optional | Plant `entity_picture` | Picture URL or path override. A missing or broken image displays a placeholder. | `/local/plants/orchid.jpg` |
 | `battery_sensor` | string, optional | Unset; no indicator | Battery percentage sensor. Glyph is shown only if the entity exists. | `sensor.sh_5_battery` |
 | `battery_warn_level` | number, optional | `10` | Battery levels below this threshold use the error colour; otherwise neutral. | `10` |
@@ -215,11 +215,13 @@ Non-cumulative current values, rings and title icons turn error red outside idea
 
 Set `full_display: graph`, or `metrics.<key>.display: graph` for one tile. The right column becomes a history line: green inside the ideal band, error red outside. The minimum is a dot on the line with an upward triangle just below it; the maximum is a dot with a downward triangle just above it. Both are points of the plotted line, so hovering them shows their value. Today and 24-hour graphs plot 5-minute statistics; longer windows plot hourly values. Min/max markers turn red outside the ideal range; a ring marks the latest plotted value. There is no average marker or Min/Avg/Max row. The illuminance line is unfiltered, including night readings; with `daylight_only` enabled, its min/max triangles use daylight values only.
 
-The scale adapts to the plotted values. If every value stays at or below the ideal minimum, the graph zooms to the data with the ideal minimum as a dashed line at the top. If every value stays at or above the ideal maximum, it zooms with the ideal maximum at the bottom. Otherwise, it uses the full scale with dashed guides at both ideal bounds. Lux graphs retain [logarithmic scaling](#reading-compact-mode-gauges).
+The vertical scale fits the observed values, with bounds rounded to easy-to-read numbers. A small y-axis labels values on the left, with faint horizontal gridlines; ideal bounds are not drawn as guide lines. Lux graphs retain [logarithmic scaling](#reading-compact-mode-gauges).
 
-Illuminance graphs with history windows up to 3 days show golden-hour boundaries only when `daylight_only` is enabled: sunrise + `daylight_offset` and sunset − `daylight_offset`. Each boundary has a sunrise/sunset icon above a dashed vertical line styled like the ideal guides, using Home Assistant's configured location. Graph time labels use Home Assistant's configured time zone.
+Illuminance graphs with history windows up to 3 days show golden-hour boundaries only when `daylight_only` is enabled: sunrise + `daylight_offset` and sunset − `daylight_offset`. Each boundary has a sunrise/sunset icon above a dashed vertical line, using Home Assistant's configured location. Graph time labels use Home Assistant's configured time zone.
 
-Hover with a mouse, or touch and drag across the graph, to inspect a point's value and time. The hover bubble stays visible while hovered; **Escape** dismisses it. Touching or hovering the graph does **not** highlight or activate the tile or open more-info; tap the rest of the tile to open the sensor dialog.
+Hover with a mouse, or touch and drag across the graph, to inspect a point's value and time. The vertical hover guide spans the full graph height. The hover bubble stays visible while hovered; **Escape** dismisses it. Touching or hovering the graph does **not** highlight or activate the tile or open more-info; tap the rest of the tile to open the sensor dialog. Problem tiles also show a hover highlight outside the graph; the plant name has a padded hover area.
+
+On every card render, the summary range bar's historical span (including the 24-hour span), current dot and average marker animate in. Graph lines draw from left to right, followed by the min/max markers and current ring. These entry animations are disabled when the browser requests reduced motion.
 
 ### Daylight-filtered illuminance
 
@@ -233,7 +235,7 @@ All history comes from Home Assistant **recorder statistics**, with no raw histo
 
 Cumulative sensors (`state_class: total` or `total_increasing`), including DLI, use the **maximum recorded value per local day**, taken from hourly states. Day boundaries use Home Assistant's configured time zone. For DLI this is the day's total. Set `metrics.dli.days` to 1–30 (default 7), independently of `history_period`. **Today is included**, with its partial total so far and the current reading. `days: 1` shows **Today** and graphs today's hourly readings; larger windows show **Daily max · N d** and one point per day. Summary Min/Avg/Max describe the daily maxima, while the large current value remains today's running total. Long-term statistics support 30-day windows when that data is available.
 
-History refreshes every **10 minutes**. Missing statistics show **—** in summary badges without a historical segment or average marker; current values and ideal ranges remain. An eligible current reading can still appear in the graph. `hide_history: true` disables fetching and hides the history label and summary statistics; summary retains its ideal ticks and current-value ring, while graph retains empty ideal-bound guides.
+History refreshes every **10 minutes**. Missing statistics show **—** in summary badges without a historical segment or average marker; current values and ideal ranges remain. An eligible current reading can still appear in the graph. `hide_history: true` disables fetching and hides the history label and summary statistics; summary retains its ideal ticks and current-value ring, while graph has no history line.
 
 `hide_units: true` hides only the unit beside the tile's current value, not the number. Release history: [CHANGELOG.md](CHANGELOG.md).
 
