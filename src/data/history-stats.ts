@@ -4,57 +4,35 @@ export interface Stats24h {
   mean: number;
 }
 
-export interface StatRow {
-  start?: number;
-  end?: number;
+export interface HourRow {
+  start: number;
+  end: number;
   min?: number | null;
   max?: number | null;
   mean?: number | null;
+  state?: number | null;
 }
 
-export function aggregateStatistics(rows: readonly StatRow[] | undefined): Stats24h | null {
-  let min = Infinity;
-  let max = -Infinity;
-  let total = 0;
-  let count = 0;
-  for (const row of rows ?? []) {
-    if (typeof row.min !== 'number' || !Number.isFinite(row.min) ||
-      typeof row.max !== 'number' || !Number.isFinite(row.max) ||
-      typeof row.mean !== 'number' || !Number.isFinite(row.mean)) continue;
-    min = Math.min(min, row.min);
-    max = Math.max(max, row.max);
-    total += row.mean;
-    count++;
-  }
-  return count ? { min, max, mean: total / count } : null;
+export interface Point { t: number; v: number; }
+
+export interface MetricHistory {
+  stats: Stats24h | null;
+  series: { t: number; v: number | null }[];
+  minPoint: Point | null;
+  maxPoint: Point | null;
 }
 
-export function aggregateDaytime(
-  points: readonly { s?: unknown; lu?: number }[] | undefined,
-  start: number,
-  now: number,
-): Stats24h | null {
-  const sorted = (points ?? [])
-    .filter((point) => typeof point.lu === 'number' && Number.isFinite(point.lu))
-    .slice().sort((a, b) => a.lu! - b.lu!);
-  let min = Infinity;
-  let max = -Infinity;
-  let total = 0;
-  let duration = 0;
-  for (let index = 0; index < sorted.length; index++) {
-    const point = sorted[index];
-    const value = typeof point.s === 'number' ? point.s
-      : typeof point.s === 'string' && point.s.trim() !== '' ? Number(point.s) : NaN;
-    const from = Math.max(point.lu! * 1000, start);
-    const to = Math.min(index + 1 < sorted.length ? sorted[index + 1].lu! * 1000 : now, now);
-    const length = to - from;
-    if (!Number.isFinite(value) || value <= 0 || length <= 0) continue;
-    min = Math.min(min, value);
-    max = Math.max(max, value);
-    total += value * length;
-    duration += length;
-  }
-  return duration > 0 ? { min, max, mean: total / duration } : null;
+export interface HistoryFetch {
+  hourly: readonly string[];
+  hourlyStart: number;
+  cumulative: readonly string[];
+  cumulativeStart: number;
+}
+
+export interface RawHistory {
+  hourly: Record<string, HourRow[]>;
+  cumulative: Record<string, HourRow[]>;
+  failedGroups: { hourly: boolean; cumulative: boolean };
 }
 
 export function withCurrent(stats: Stats24h | null, value: number | null): Stats24h | null {
@@ -62,125 +40,117 @@ export function withCurrent(stats: Stats24h | null, value: number | null): Stats
   return { min: Math.min(stats.min, value), max: Math.max(stats.max, value), mean: stats.mean };
 }
 
-export type HistoryWindow = '24h' | '7d';
-
-export interface DailyRow {
-  start?: number;
-  end?: number;
-  change?: number | null;
+export async function fetchHistory(
+  hass: { callWS: <T>(msg: Record<string, unknown>) => Promise<T> },
+  req: HistoryFetch,
+  now = Date.now(),
+): Promise<RawHistory> {
+  const result: RawHistory = {
+    hourly: {}, cumulative: {}, failedGroups: { hourly: false, cumulative: false },
+  };
+  await Promise.all((['hourly', 'cumulative'] as const).map(async (group) => {
+    try {
+      const ids = [...new Set(req[group])];
+      if (ids.length === 0) return;
+      result[group] = await hass.callWS<Record<string, HourRow[]>>({
+        type: 'recorder/statistics_during_period',
+        start_time: new Date(group === 'hourly' ? req.hourlyStart : req.cumulativeStart).toISOString(),
+        end_time: new Date(now).toISOString(),
+        statistic_ids: ids,
+        period: 'hour',
+        types: group === 'hourly' ? ['min', 'max', 'mean'] : ['state'],
+      });
+    } catch {
+      result.failedGroups[group] = true;
+    }
+  }));
+  return result;
 }
 
-export function aggregateDailyTotals(rows: readonly DailyRow[] | undefined, now: number): Stats24h | null {
-  let min = Infinity;
-  let max = -Infinity;
+export function localDayStart(t: number, daysBack = 0): number {
+  const date = new Date(t);
+  date.setHours(0, 0, 0, 0);
+  date.setDate(date.getDate() - daysBack);
+  return date.getTime();
+}
+
+export function summarizeHourly(
+  rows: readonly HourRow[] | undefined,
+  o: { start: number; now: number; current: number | null; keep?: (start: number, end: number) => boolean },
+): MetricHistory {
+  const history: MetricHistory = { stats: null, series: [], minPoint: null, maxPoint: null };
   let total = 0;
   let count = 0;
-  for (const row of rows ?? []) {
-    if (typeof row.change !== 'number' || !Number.isFinite(row.change) ||
-      typeof row.end !== 'number' || !Number.isFinite(row.end) || !(row.end <= now)) continue;
-    min = Math.min(min, row.change);
-    max = Math.max(max, row.change);
-    total += row.change;
+  const considered = (rows ?? []).filter((r) => o.start <= r.start && r.start < o.now)
+    .sort((a, b) => a.start - b.start);
+  for (const row of considered) {
+    const t = (row.start + row.end) / 2;
+    if (typeof row.min !== 'number' || !Number.isFinite(row.min) ||
+      typeof row.max !== 'number' || !Number.isFinite(row.max) ||
+      typeof row.mean !== 'number' || !Number.isFinite(row.mean) ||
+      (o.keep && !o.keep(row.start, row.end))) {
+      history.series.push({ t, v: null });
+      continue;
+    }
+    history.series.push({ t, v: row.mean });
+    if (history.minPoint === null || row.min < history.minPoint.v) history.minPoint = { t, v: row.min };
+    if (history.maxPoint === null || row.max > history.maxPoint.v) history.maxPoint = { t, v: row.max };
+    total += row.mean;
     count++;
   }
-  return count ? { min, max, mean: total / count } : null;
+  if (history.minPoint !== null && history.maxPoint !== null) {
+    history.stats = { min: history.minPoint.v, max: history.maxPoint.v, mean: total / count };
+  }
+  if (o.current !== null) {
+    history.series.push({ t: o.now, v: o.current });
+    if (history.minPoint !== null && o.current < history.minPoint.v) {
+      history.minPoint = { t: o.now, v: o.current };
+    }
+    if (history.maxPoint !== null && o.current > history.maxPoint.v) {
+      history.maxPoint = { t: o.now, v: o.current };
+    }
+    history.stats = withCurrent(history.stats, o.current);
+  }
+  return history;
 }
 
-export interface HistoryRequest {
-  range: readonly string[];
-  dailyTotals: readonly string[];
-  daytime: readonly string[];
-  window: HistoryWindow;
-}
-
-export interface HistoryResult {
-  range: Record<string, Stats24h>;
-  dailyTotals: Record<string, Stats24h>;
-  daytime: Record<string, Stats24h>;
-  failedGroups: { range: boolean; dailyTotals: boolean; daytime: boolean };
-  failed: boolean;
-}
-
-export async function fetchHistoryStats(
-  hass: { callWS: <T>(msg: Record<string, unknown>) => Promise<T> },
-  req: HistoryRequest,
-  now: number = Date.now(),
-): Promise<HistoryResult> {
-  const result: HistoryResult = {
-    range: {}, dailyTotals: {}, daytime: {}, failed: false,
-    failedGroups: { range: false, dailyTotals: false, daytime: false },
-  };
-  await Promise.all([
-    (async () => {
-      const ids = [...new Set(req.range)];
-      if (ids.length === 0) return;
-      try {
-        const response = await hass.callWS<Record<string, StatRow[]>>({
-          type: 'recorder/statistics_during_period',
-          start_time: new Date(now - (req.window === '7d' ? 7 * 86400000 : 86400000)).toISOString(),
-          statistic_ids: ids,
-          period: 'hour',
-          types: ['min', 'max', 'mean'],
-        });
-        const range: Record<string, Stats24h> = {};
-        for (const id of ids) {
-          const stats = aggregateStatistics(response[id]);
-          if (stats !== null) range[id] = stats;
-        }
-        result.range = range;
-      } catch {
-        result.failedGroups.range = true;
-      }
-    })(),
-    (async () => {
-      const ids = [...new Set(req.dailyTotals)];
-      if (ids.length === 0) return;
-      try {
-        const start = new Date(now);
-        start.setHours(0, 0, 0, 0);
-        start.setDate(start.getDate() - 7);
-        const response = await hass.callWS<Record<string, DailyRow[]>>({
-          type: 'recorder/statistics_during_period',
-          start_time: start.toISOString(),
-          statistic_ids: ids,
-          period: 'day',
-          types: ['change'],
-        });
-        const dailyTotals: Record<string, Stats24h> = {};
-        for (const id of ids) {
-          const stats = aggregateDailyTotals(response[id], now);
-          if (stats !== null) dailyTotals[id] = stats;
-        }
-        result.dailyTotals = dailyTotals;
-      } catch {
-        result.failedGroups.dailyTotals = true;
-      }
-    })(),
-    (async () => {
-      const ids = [...new Set(req.daytime)];
-      if (ids.length === 0) return;
-      try {
-        const start = now - (req.window === '7d' ? 7 * 86400000 : 86400000);
-        const response = await hass.callWS<Record<string, { s?: unknown; lu?: number }[]>>({
-          type: 'history/history_during_period',
-          start_time: new Date(start).toISOString(),
-          end_time: new Date(now).toISOString(),
-          entity_ids: ids,
-          minimal_response: true,
-          no_attributes: true,
-          significant_changes_only: false,
-        });
-        const daytime: Record<string, Stats24h> = {};
-        for (const id of ids) {
-          const stats = aggregateDaytime(response[id], start, now);
-          if (stats !== null) daytime[id] = stats;
-        }
-        result.daytime = daytime;
-      } catch {
-        result.failedGroups.daytime = true;
-      }
-    })(),
-  ]);
-  result.failed = result.failedGroups.range || result.failedGroups.dailyTotals || result.failedGroups.daytime;
-  return result;
+export function summarizeDailyMax(
+  rows: readonly HourRow[] | undefined,
+  o: { days: number; now: number; current: number | null },
+): MetricHistory {
+  const days = Math.max(1, Math.min(30, Math.round(o.days)));
+  const history: MetricHistory = { stats: null, series: [], minPoint: null, maxPoint: null };
+  let total = 0;
+  let count = 0;
+  for (let i = days - 1; i >= 0; i--) {
+    const start = localDayStart(o.now, i);
+    const end = localDayStart(o.now, i - 1);
+    const dayRows = (rows ?? []).filter((r) => start <= r.start && r.start < end)
+      .sort((a, b) => a.start - b.start);
+    let value: number | null = null;
+    for (const row of dayRows) {
+      const state = typeof row.state === 'number' && Number.isFinite(row.state) ? row.state : null;
+      if (state !== null) value = value === null ? state : Math.max(value, state);
+      if (days === 1) history.series.push({ t: (row.start + row.end) / 2, v: state });
+    }
+    if (i === 0 && o.current !== null) {
+      value = value === null ? o.current : Math.max(value, o.current);
+      if (days === 1) history.series.push({ t: o.now, v: o.current });
+    }
+    if (days === 1) {
+      history.stats = value === null ? null : { min: value, max: value, mean: value };
+      return history;
+    }
+    const t = start + 12 * 3600000;
+    history.series.push({ t, v: value });
+    if (value === null) continue;
+    if (history.minPoint === null || value < history.minPoint.v) history.minPoint = { t, v: value };
+    if (history.maxPoint === null || value > history.maxPoint.v) history.maxPoint = { t, v: value };
+    total += value;
+    count++;
+  }
+  if (history.minPoint !== null && history.maxPoint !== null) {
+    history.stats = { min: history.minPoint.v, max: history.maxPoint.v, mean: total / count };
+  }
+  return history;
 }
