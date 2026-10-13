@@ -1,4 +1,4 @@
-import { DEFAULT_GAUGES, MEASUREMENT_KEYS, MEASUREMENT_LABELS } from './types';
+import { DEFAULT_GAUGES, DEFAULT_ICONS, MEASUREMENT_KEYS, MEASUREMENT_LABELS } from './types';
 
 interface SelectOption {
   value: string;
@@ -17,6 +17,7 @@ export interface HaFormSchema {
   selector?: {
     entity?: { domain: string; device_class?: string };
     text?: Record<string, never>;
+    icon?: Record<string, never>;
     boolean?: Record<string, never>;
     select?: {
       multiple?: boolean;
@@ -28,7 +29,7 @@ export interface HaFormSchema {
       min: number;
       max: number;
       step: number;
-      mode: 'box';
+      mode: 'box' | 'slider';
       unit_of_measurement: string;
     };
   };
@@ -46,6 +47,19 @@ const batteryLevel = (name: string): HaFormSchema => ({
   },
 });
 
+const historyOptions = (): SelectOption[] => [
+  { value: '24h', label: 'Last 24 hours' },
+  { value: '3d', label: 'Last 3 days' },
+  { value: '7d', label: 'Last 7 days' },
+  { value: '14d', label: 'Last 14 days' },
+  { value: '30d', label: 'Last 30 days' },
+];
+
+const displayOptions = (): SelectOption[] => [
+  { value: 'summary', label: 'Summary' },
+  { value: 'graph', label: 'Graph' },
+];
+
 const labels: Readonly<Record<string, string>> = {
   entity: 'Plant entity',
   name: 'Name',
@@ -54,8 +68,15 @@ const labels: Readonly<Record<string, string>> = {
   show_bars: 'Gauges',
   hide_units: 'Hide units',
   hide_history: 'Hide history',
-  history_period: 'History window',
-  illuminance_daytime_only: 'Ignore darkness in illuminance history',
+  history_period: 'Default history window',
+  full_display: 'Full mode display',
+  icon: 'Icon',
+  problem_trigger: 'Problem trigger',
+  display: 'Display',
+  days: 'Days (1 = today)',
+  period: 'History window',
+  daylight_only: 'Daylight only (sunrise/sunset)',
+  daylight_offset: 'Ignore after sunrise / before sunset',
   problem_source: 'Problem source',
   problem_sensors: 'Problem sensors',
   hide_species: 'Hide species',
@@ -67,8 +88,11 @@ const labels: Readonly<Record<string, string>> = {
 const helpers: Readonly<Record<string, string>> = {
   hide_units: 'Hides units next to values.',
   hide_history: 'Full mode only: hides the history range, average and Min/Avg/Max.',
-  history_period: 'Full mode. DLI is a daily total, so it always shows daily totals for the last 7 days.',
-  illuminance_daytime_only: 'Full mode: excludes 0 lx (night) readings from the illuminance range, average and Min/Avg/Max. On by default.',
+  history_period: 'Default full-mode history window; each metric can override it. DLI uses its Days setting.',
+  full_display: 'Summary shows the range and Min/Avg/Max; Graph shows the history line. Each metric can override it.',
+  problem_trigger: 'Independent of the plant monitor unless set to Follow plant monitor.',
+  days: 'DLI uses the maximum value of each day.',
+  daylight_offset: 'Minutes after sunrise and before sunset to ignore (default 30).',
   show_bars: `Default: ${DEFAULT_GAUGES.map((key) => MEASUREMENT_LABELS[key]).join(', ')}.`,
   problem_source: "Plant monitor follows the integration's problem triggers; Gauges flags any out-of-range value.",
   problem_sensors: 'Leave empty to allow every sensor.',
@@ -95,15 +119,48 @@ const schema: HaFormSchema[] = [
       } } },
       { name: 'hide_units', selector: { boolean: {} } },
       { name: 'hide_history', selector: { boolean: {} } },
-      { name: 'illuminance_daytime_only', selector: { boolean: {} } },
       { name: 'history_period', selector: { select: {
-        mode: 'dropdown',
-        options: [
-          { value: '24h', label: 'Last 24 hours' },
-          { value: '7d', label: 'Last 7 days' },
-        ],
+        mode: 'dropdown', options: historyOptions(),
+      } } },
+      { name: 'full_display', selector: { select: {
+        mode: 'dropdown', options: displayOptions(),
       } } },
     ],
+  },
+  {
+    type: 'expandable', name: 'metrics', title: 'Per-metric settings', icon: 'mdi:tune-variant',
+    schema: MEASUREMENT_KEYS.map((key): HaFormSchema => ({
+      type: 'expandable', name: key, title: MEASUREMENT_LABELS[key], icon: DEFAULT_ICONS[key],
+      schema: [
+        { name: 'icon', selector: { icon: {} } },
+        { name: 'problem_trigger', selector: { select: {
+          mode: 'dropdown',
+          options: [
+            { value: 'plant', label: 'Follow plant monitor' },
+            { value: 'out_of_range', label: 'Outside ideal range' },
+            { value: 'low', label: 'Too low only' },
+            { value: 'high', label: 'Too high only' },
+            { value: 'never', label: 'Never' },
+          ],
+        } } },
+        { name: 'display', selector: { select: {
+          mode: 'dropdown', options: displayOptions(),
+        } } },
+        key === 'dli'
+          ? { name: 'days', selector: { number: {
+            min: 1, max: 30, step: 1, mode: 'slider', unit_of_measurement: 'days',
+          } } }
+          : { name: 'period', selector: { select: {
+            mode: 'dropdown', options: historyOptions(),
+          } } },
+        ...(key === 'illuminance' ? [
+          { name: 'daylight_only', selector: { boolean: {} } },
+          { name: 'daylight_offset', selector: { number: {
+            min: 0, max: 180, step: 5, mode: 'box' as const, unit_of_measurement: 'min',
+          } } },
+        ] : []),
+      ],
+    })),
   },
   {
     type: 'expandable', name: '', title: 'Problems', icon: 'mdi:alert-circle-outline', flatten: true,
