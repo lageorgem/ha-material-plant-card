@@ -275,7 +275,7 @@ export class MplHistoryGraph extends LitElement {
           fill="var(--mpl-range-bar-ring, var(--mpl-surface-container-high))"
           stroke=${currentColour} stroke-width="2"></circle>` : nothing}
         ${hover ? svg`
-          <line class="hover-guide" x1=${this._x(hover.t)} x2=${this._x(hover.t)} y1=${ICON_BAND} y2=${GRAPH_HEIGHT}
+          <line class="hover-guide" x1=${this._x(hover.t)} x2=${this._x(hover.t)} y1="0" y2=${GRAPH_HEIGHT}
             stroke="var(--mpl-on-surface-variant)" stroke-width="1" opacity="0.4"></line>
           <circle class="hover-dot" cx=${this._x(hover.t)} cy=${y(hover.f!)} r="3" fill=${colour(hover.f!, low, high)}></circle>
         ` : nothing}

@@ -202,10 +202,12 @@ describe('mpl-history-graph', () => {
         expect([...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')]
           .map(guide => guide.y1.baseVal.value)).to.deep.equal([22, 56]);
        for (const shape of el.shadowRoot!.querySelectorAll<SVGGraphicsElement>(
-         '.history-line, .threshold-guide, .event-line, .min-marker, .max-marker, .min-dot, .max-dot, .current-ring, .hover-guide, .hover-dot',
+         '.history-line, .threshold-guide, .event-line, .min-marker, .max-marker, .min-dot, .max-dot, .current-ring, .hover-dot',
        )) {
          expect(shape.getBoundingClientRect().top - host.top, shape.classList.value).to.be.at.least(14);
        }
+       const hoverGuide = node<SVGLineElement>(el, '.hover-guide');
+       expect([hoverGuide.y1.baseVal.value, hoverGuide.y2.baseVal.value]).to.deep.equal([0, 64]);
        const icon = node<HTMLElement>(el, '.event-icon').getBoundingClientRect();
        expect(icon.top - host.top).to.equal(1);
        expect(icon.bottom - host.top).to.be.at.most(14);
