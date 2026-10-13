@@ -21,7 +21,7 @@ export const DEFAULT_ICONS: Readonly<Record<MeasurementKey, string>> = {
   soil_temperature: 'mdi:thermometer-probe', vpd: 'mdi:water-thermometer-outline',
 };
 
-export type HistoryPeriod = '24h' | '3d' | '7d' | '14d' | '30d';
+export type HistoryPeriod = 'today' | '24h' | '3d' | '7d' | '14d' | '30d';
 export type ProblemTrigger = 'plant' | 'out_of_range' | 'low' | 'high' | 'never';
 export type FullDisplay = 'summary' | 'graph';
 export interface MetricConfig {
@@ -45,7 +45,7 @@ export interface MaterialPlantCardConfig {
   hide_image?: boolean;
   hide_units?: boolean;
   hide_history?: boolean;
-  // Full-mode range window; defaults to '24h'. Cumulative metrics use daily maxima.
+  // Full-mode range window; defaults to 'today'. Cumulative metrics use daily maxima.
   history_period?: HistoryPeriod;
   metrics?: Partial<Record<string, MetricConfig>>;
   full_display?: FullDisplay;

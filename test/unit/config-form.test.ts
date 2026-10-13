@@ -88,6 +88,7 @@ describe('configForm', () => {
     } });
     expect(field('history_period').selector).to.deep.equal({ select: {
       mode: 'dropdown', options: [
+        { value: 'today', label: 'Today' },
         { value: '24h', label: 'Last 24 hours' },
         { value: '3d', label: 'Last 3 days' },
         { value: '7d', label: 'Last 7 days' },

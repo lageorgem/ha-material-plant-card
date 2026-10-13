@@ -1,12 +1,18 @@
 import type { FullDisplay, HistoryPeriod, MaterialPlantCardConfig, ProblemTrigger } from '../types';
+import { localDayStart } from '../data/history-stats';
 
 export const PERIOD_MS: Readonly<Record<HistoryPeriod, number>> = {
+  today: 86400000, // Fetch sizing only; today's actual start is local midnight.
   '24h': 86400000,
   '3d': 259200000,
   '7d': 604800000,
   '14d': 1209600000,
   '30d': 2592000000,
 };
+
+export function periodStart(period: HistoryPeriod, now: number, timeZone?: string): number {
+  return period === 'today' ? localDayStart(now, 0, timeZone) : now - PERIOD_MS[period];
+}
 
 export interface ResolvedMetric {
   icon?: string;
@@ -33,7 +39,7 @@ function validTrigger(value: unknown): value is ProblemTrigger {
 
 export function resolveMetric(cfg: MaterialPlantCardConfig, key: string): ResolvedMetric {
   const m = cfg.metrics?.[key] ?? {};
-  const period = validPeriod(m.period) ? m.period : validPeriod(cfg.history_period) ? cfg.history_period : '24h';
+  const period = validPeriod(m.period) ? m.period : validPeriod(cfg.history_period) ? cfg.history_period : 'today';
   const days = typeof m.days === 'number' && Number.isFinite(m.days)
     ? Math.max(1, Math.min(30, Math.round(m.days))) : 7;
   const trigger = validTrigger(m.problem_trigger) ? m.problem_trigger

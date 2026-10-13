@@ -48,6 +48,7 @@ const batteryLevel = (name: string): HaFormSchema => ({
 });
 
 const historyOptions = (): SelectOption[] => [
+  { value: 'today', label: 'Today' },
   { value: '24h', label: 'Last 24 hours' },
   { value: '3d', label: 'Last 3 days' },
   { value: '7d', label: 'Last 7 days' },
