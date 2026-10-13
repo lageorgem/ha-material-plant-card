@@ -161,10 +161,15 @@ export class MplMetricRow extends LitElement {
       min-width: 0;
     }
     :host([display='graph']) {
-      grid-template-rows: var(--mpl-metric-label-line) var(--mpl-metric-value-line) var(--mpl-metric-graph-caption-track);
+      height: calc(var(--mpl-metric-label-line) + var(--mpl-metric-value-line) + var(--mpl-metric-graph-caption-track));
+      grid-template-rows: var(--mpl-metric-label-line) 1fr auto;
+    }
+    :host([display='graph']) .value,
+    :host([display='graph']) .ideal {
+      align-self: end;
     }
     :host([display='graph']) .ideal {
-      align-self: start;
+      min-height: var(--mpl-metric-caption-line);
     }
     .title {
       grid-column: 1 / -1;

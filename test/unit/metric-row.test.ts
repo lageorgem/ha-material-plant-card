@@ -320,18 +320,39 @@ describe('mpl-metric-row graph display', () => {
     expect(style.gridColumnStart).to.equal('2');
     expect(style.gridRowStart).to.equal('2');
     expect(style.gridRowEnd).to.equal('4');
-    expect(getComputedStyle(el).gridTemplateRows).to.equal('20px 28px 36px');
+    expect(getComputedStyle(el).gridTemplateRows).to.equal('20px 44px 20px');
     expect(graph(el).getBoundingClientRect().height).to.equal(64);
     expect(el.getBoundingClientRect().height).to.equal(84);
     expect(getComputedStyle(element(el, '.value')).gridRowStart).to.equal('2');
     expect(getComputedStyle(element(el, '.ideal')).gridRowStart).to.equal('3');
-    expect(getComputedStyle(element(el, '.ideal')).alignSelf).to.equal('start');
+    expect(getComputedStyle(element(el, '.value')).alignSelf).to.equal('end');
+    expect(getComputedStyle(element(el, '.ideal')).alignSelf).to.equal('end');
     el.display = 'summary';
     await el.updateComplete;
     expect(el.shadowRoot!.querySelector('mpl-history-graph')).to.equal(null);
     expect(badges(el)).to.have.length(3);
     expect(getComputedStyle(el).gridTemplateRows).to.equal('20px 28px 20px');
     expect(el.getBoundingClientRect().height).to.equal(68);
+  });
+
+  it('bottom-aligns value and Ideal while the graph fills all space below the title', async () => {
+    const el = await graphRow();
+    for (const width of ['271px', '400px']) {
+      el.style.width = width;
+      const bounds = el.getBoundingClientRect();
+      const title = element(el, '.title').getBoundingClientRect();
+      const plot = graph(el).getBoundingClientRect();
+      const ideal = element(el, '.ideal').getBoundingClientRect();
+      const value = element(el, '.value').getBoundingClientRect();
+      expect(bounds.height).to.equal(84);
+      expect(getComputedStyle(el).rowGap).to.equal('0px');
+      expect(plot.height).to.equal(64);
+      expect(plot.top).to.be.closeTo(title.bottom, 0.5);
+      expect(plot.bottom).to.be.closeTo(bounds.bottom, 0.5);
+      expect(ideal.height).to.equal(20);
+      expect(ideal.bottom).to.be.closeTo(plot.bottom, 0.5);
+      expect(value.bottom).to.be.closeTo(ideal.top, 0.5);
+    }
   });
 
   for (const missingHourly of [false, true]) {
