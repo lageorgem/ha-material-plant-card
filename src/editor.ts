@@ -37,12 +37,20 @@ const BASE_SCHEMA: Schema[] = [
     ],
   },
 ];
+const COMPACT_LAYOUT_SCHEMA: Schema = {
+  name: '', type: 'expandable', title: 'Compact layout', icon: 'mdi:view-grid-outline', flatten: true,
+  schema: [
+    { name: 'gauges_per_row', selector: { number: { min: 1, max: 12, step: 1, mode: 'box' } } },
+    { name: 'gauge_size', selector: { number: { min: 32, max: 96, step: 4, mode: 'slider', unit_of_measurement: 'px' } } },
+  ],
+};
 const LABELS: Readonly<Record<string, string>> = {
   entity: 'Plant entity', name: 'Name', battery_sensor: 'Battery sensor', display_type: 'Display type',
   hide_species: 'Hide species', hide_image: 'Hide image', hide_units: 'Hide units', image: 'Image',
   battery_warn_level: 'Battery low below', icon: 'Icon', display: 'Display', problem_trigger: 'Problem trigger',
   days: 'Days (1 = today)', period: 'History window', daylight_only: 'Daylight only (sunrise/sunset)',
   daylight_offset: 'Ignore after sunrise / before sunset',
+  gauges_per_row: 'Gauges per row', gauge_size: 'Gauge size',
 };
 const HELPERS: Readonly<Record<string, string>> = {
   hide_units: 'Hides units next to values.', image: 'Overrides the plant picture.',
@@ -50,6 +58,7 @@ const HELPERS: Readonly<Record<string, string>> = {
   problem_trigger: 'Independent of the plant monitor unless set to Follow plant monitor.',
   days: 'DLI uses the maximum value of each day.',
   daylight_offset: 'Minutes after sunrise and before sunset to ignore (default 30).',
+  gauges_per_row: 'Leave empty to balance rows automatically.', gauge_size: 'Default 44 px.',
 };
 const DEFAULTS: Readonly<FormData> = {
   icon: '', display: 'summary', problem_trigger: 'plant', period: 'today', days: 7,
@@ -95,11 +104,14 @@ export class MaterialPlantCardEditor extends LitElement implements LovelaceCardE
   }
   private _computeLabel = (schema: Schema): string => LABELS[schema.name] ?? schema.title ?? schema.name;
   private _computeHelper = (schema: Schema): string => HELPERS[schema.name] ?? '';
+  private get _schema(): Schema[] {
+    return this._config.display_type === 'compact' ? [...BASE_SCHEMA, COMPACT_LAYOUT_SCHEMA] : BASE_SCHEMA;
+  }
   private _formChanged(e: CustomEvent<{ value: FormData }>): void {
     e.stopPropagation();
     const config = { ...this._config };
     const record = config as unknown as FormData;
-    const fields = BASE_SCHEMA.flatMap(field => field.schema ?? [field]);
+    const fields = this._schema.flatMap(field => field.schema ?? [field]);
     for (const { name } of fields) {
       if (!Object.prototype.hasOwnProperty.call(e.detail.value, name)) continue;
       const value = e.detail.value[name];
@@ -197,11 +209,12 @@ export class MaterialPlantCardEditor extends LitElement implements LovelaceCardE
     const metrics = this._metrics;
     const missing = MEASUREMENT_KEYS.filter(type => !metrics.some(entry => entry.type === type));
     return html`<div class="editor">
-      <ha-form .hass=${this.hass} .schema=${BASE_SCHEMA} .data=${{
+      <ha-form .hass=${this.hass} .schema=${this._schema} .data=${{
         entity: config.entity, name: config.name, battery_sensor: config.battery_sensor,
         display_type: config.display_type ?? 'full', hide_species: config.hide_species ?? false,
         hide_image: config.hide_image ?? false, hide_units: config.hide_units ?? false,
         image: config.image, battery_warn_level: config.battery_warn_level ?? 10,
+        ...(config.display_type === 'compact' ? { gauges_per_row: config.gauges_per_row, gauge_size: config.gauge_size ?? 44 } : {}),
       }} .computeLabel=${this._computeLabel} .computeHelper=${this._computeHelper} @value-changed=${this._formChanged}></ha-form>
       <div class="metrics-header">Metrics</div>
       ${metrics.length ? nothing : html`<p class="hint">No metrics yet. Add a metric below.</p>`}

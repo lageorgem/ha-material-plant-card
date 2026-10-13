@@ -71,6 +71,52 @@ describe('material-plant-card-editor', () => {
     expect(next).not.to.have.property('metrics');
     expect(original.name).to.equal('Old');
   });
+  for (const display_type of [undefined, 'full'] as const) it(`hides compact layout for ${display_type ?? 'default'} display`, async () => {
+    const el = await setup({ ...base, display_type });
+    const form = el.shadowRoot!.querySelector('ha-form') as Form;
+    expect(form.schema.some(field => field.title === 'Compact layout')).to.equal(false);
+    const fields = form.schema.flatMap(field => field.schema ?? [field]);
+    expect(fields.map(field => field.name)).not.to.include('gauges_per_row');
+    expect(fields.map(field => field.name)).not.to.include('gauge_size');
+  });
+  it('exposes flattened compact layout selectors, labels, helpers and configured values', async () => {
+    const el = await setup({ ...base, display_type: 'compact', gauges_per_row: 3, gauge_size: 52 });
+    const form = el.shadowRoot!.querySelector('ha-form') as Form;
+    const layout = form.schema.find(field => field.title === 'Compact layout');
+    expect(layout).to.include({ type: 'expandable', icon: 'mdi:view-grid-outline', flatten: true });
+    expect(layout!.schema).to.deep.equal([
+      { name: 'gauges_per_row', selector: { number: { min: 1, max: 12, step: 1, mode: 'box' } } },
+      { name: 'gauge_size', selector: { number: { min: 32, max: 96, step: 4, mode: 'slider', unit_of_measurement: 'px' } } },
+    ]);
+    expect(form.computeLabel({ name: 'gauges_per_row' })).to.equal('Gauges per row');
+    expect(form.computeLabel({ name: 'gauge_size' })).to.equal('Gauge size');
+    expect(form.computeHelper({ name: 'gauges_per_row' })).to.equal('Leave empty to balance rows automatically.');
+    expect(form.computeHelper({ name: 'gauge_size' })).to.equal('Default 44 px.');
+    expect(form.data).to.include({ gauges_per_row: 3, gauge_size: 52 });
+  });
+  it('updates compact values immutably and removes cleared gauges per row', async () => {
+    const original = { ...base, display_type: 'compact' as const, gauges_per_row: 3, gauge_size: 52 };
+    const el = await setup(original);
+    const form = el.shadowRoot!.querySelector('ha-form') as Form;
+    const next = await change(el, form, { gauges_per_row: 4, gauge_size: 60 });
+    expect(next).to.include({ gauges_per_row: 4, gauge_size: 60 });
+    expect(form.data).to.include({ gauges_per_row: 4, gauge_size: 60 });
+    for (const value of ['', null, undefined]) {
+      await change(el, form, { gauges_per_row: 4 });
+      const cleared = await change(el, form, { gauges_per_row: value });
+      expect(cleared).not.to.have.property('gauges_per_row');
+      expect(cleared).to.include({ gauge_size: 60 });
+    }
+    expect(original).to.include({ gauges_per_row: 3, gauge_size: 52 });
+  });
+  it('updates compact layout visibility when display type changes', async () => {
+    const el = await setup();
+    const form = el.shadowRoot!.querySelector('ha-form') as Form;
+    await change(el, form, { display_type: 'compact' });
+    expect(form.schema.some(field => field.title === 'Compact layout')).to.equal(true);
+    await change(el, form, { display_type: 'full' });
+    expect(form.schema.some(field => field.title === 'Compact layout')).to.equal(false);
+  });
   it('adds only missing metrics, appends a bare type and expands one row', async () => {
     const el = await setup({ ...base, metrics: [{ type: 'moisture' }] });
     await click(el, '.add-btn');
