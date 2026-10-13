@@ -106,6 +106,41 @@ describe('fetchHistory', () => {
 });
 
 describe('localDayStart', () => {
+  it('uses the configured calendar date rather than UTC at the Bucharest reset', () => {
+    const instant = Date.parse('2026-10-13T22:00:00Z');
+    expect(localDayStart(instant, 0, 'Europe/Bucharest')).to.equal(Date.parse('2026-10-13T21:00:00Z'));
+    expect(localDayStart(instant, 0, 'UTC')).to.equal(Date.parse('2026-10-13T00:00:00Z'));
+    expect(localDayStart(instant, 1, 'Europe/Bucharest')).to.equal(Date.parse('2026-10-12T21:00:00Z'));
+  });
+
+  for (const [date, start, end, hours] of [
+    ['2026-03-29T12:00:00Z', '2026-03-28T22:00:00Z', '2026-03-29T21:00:00Z', 23],
+    ['2026-10-25T12:00:00Z', '2026-10-24T21:00:00Z', '2026-10-25T22:00:00Z', 25],
+  ] as const) {
+    it(`uses ${hours}-hour Bucharest DST days`, () => {
+      const instant = Date.parse(date);
+      expect(localDayStart(instant, 0, 'Europe/Bucharest')).to.equal(Date.parse(start));
+      expect(localDayStart(instant, -1, 'Europe/Bucharest')).to.equal(Date.parse(end));
+      expect(localDayStart(Date.parse(end), 1, 'Europe/Bucharest')).to.equal(Date.parse(start));
+      expect(Date.parse(end) - Date.parse(start)).to.equal(hours * hour);
+    });
+  }
+
+  it('supports half-hour offsets and calendar-year rollover', () => {
+    const instant = Date.parse('2026-01-01T02:00:00Z');
+    expect(localDayStart(instant, 0, 'America/St_Johns')).to.equal(Date.parse('2025-12-31T03:30:00Z'));
+    expect(localDayStart(instant, -1, 'America/St_Johns')).to.equal(Date.parse('2026-01-01T03:30:00Z'));
+  });
+
+  it('returns the first instant of a date when midnight is skipped', () => {
+    expect(localDayStart(Date.parse('2026-03-08T12:00:00Z'), 0, 'America/Havana'))
+      .to.equal(Date.parse('2026-03-08T05:00:00Z'));
+  });
+
+  it('falls back to browser-local behavior for an invalid zone', () => {
+    expect(localDayStart(now, 2, 'Not/A_TimeZone')).to.equal(localDayStart(now, 2));
+  });
+
   it('uses local calendar midnight with daysBack, including month and DST boundaries', () => {
     expect(localDayStart(at(13, 12, 34))).to.equal(at(13));
     expect(localDayStart(at(13, 12), 6)).to.equal(at(7));
@@ -187,6 +222,44 @@ describe('summarizeHourly', () => {
 });
 
 describe('summarizeDailyMax', () => {
+  it('excludes the preceding HA day peak after the Bucharest reset, unlike UTC', () => {
+    const instant = Date.parse('2026-10-13T22:00:00Z');
+    const rows = [row(Date.parse('2026-10-13T20:00:00Z'), { state: 12 }),
+      row(Date.parse('2026-10-13T21:00:00Z'), { state: 0 })];
+    const options = { days: 1, now: instant, current: 1 };
+    expect(summarizeDailyMax(rows, { ...options, timeZone: 'Europe/Bucharest' }).stats)
+      .to.deep.equal({ min: 1, max: 1, mean: 1 });
+    expect(summarizeDailyMax(rows, { ...options, timeZone: 'UTC' }).stats)
+      .to.deep.equal({ min: 12, max: 12, mean: 12 });
+  });
+
+  for (const [start, end] of [
+    ['2026-03-28T22:00:00Z', '2026-03-29T21:00:00Z'],
+    ['2026-10-24T21:00:00Z', '2026-10-25T22:00:00Z'],
+  ]) {
+    it(`buckets both sides of the DST boundary ${end} without leaking peaks`, () => {
+      const first = Date.parse(start);
+      const next = Date.parse(end);
+      const rows = [row(first - 1, { state: 100 }), row(first, { state: 2 }),
+        row(next - hour, { state: 9 }), row(next, { state: 0 })];
+      const result = summarizeDailyMax(rows, {
+        days: 2, now: next + hour, current: 1, timeZone: 'Europe/Bucharest',
+      });
+      expect(result.series).to.deep.equal([{ t: first + 12 * hour, v: 9 },
+        { t: next + 12 * hour, v: 1 }]);
+    });
+  }
+
+  it('uses half-hour reset boundaries and falls back for invalid zones', () => {
+    const instant = Date.parse('2026-01-01T06:00:00Z');
+    const rows = [row(Date.parse('2026-01-01T03:00:00Z'), { state: 10 }),
+      row(Date.parse('2026-01-01T03:30:00Z'), { state: 0 })];
+    const options = { days: 1, now: instant, current: 1 };
+    expect(summarizeDailyMax(rows, { ...options, timeZone: 'America/St_Johns' }).stats?.max).to.equal(1);
+    expect(summarizeDailyMax(rows, { ...options, timeZone: 'Not/A_TimeZone' }))
+      .to.deep.equal(summarizeDailyMax(rows, options));
+  });
+
   it('uses seven local-day maxima, missing-day gaps, today current, and extrema markers', () => {
     const rows = [row(at(6, 23), { state: 100 }), row(at(7, 22), { state: 10.23 }),
       row(at(7, 23), { state: 9 }), row(at(8, 23), { state: 8.23 }),

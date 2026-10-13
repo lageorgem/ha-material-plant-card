@@ -67,7 +67,40 @@ export async function fetchHistory(
   return result;
 }
 
-export function localDayStart(t: number, daysBack = 0): number {
+export function localDayStart(t: number, daysBack = 0, timeZone?: string): number {
+  let formatter: Intl.DateTimeFormat | undefined;
+  if (timeZone && Number.isFinite(t) && Number.isFinite(daysBack)) {
+    try {
+      formatter = new Intl.DateTimeFormat('en-US', {
+        timeZone, calendar: 'gregory', numberingSystem: 'latn',
+        year: 'numeric', month: 'numeric', day: 'numeric',
+      });
+    } catch {
+      // Invalid HA configuration retains the browser-local behavior.
+    }
+  }
+  if (formatter) {
+    const calendarDate = (instant: number): number => {
+      const parts = formatter.formatToParts(instant);
+      const part = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+      const date = new Date(0);
+      date.setUTCFullYear(part('year'), part('month') - 1, part('day'));
+      return date.getTime();
+    };
+    const target = new Date(calendarDate(t));
+    target.setUTCDate(target.getUTCDate() - daysBack);
+    const day = target.getTime();
+    // Search by calendar date, not a fixed UTC offset: midnight may be
+    // skipped or repeated. The lower bound selects the date's first instant.
+    let low = day - 36 * 3600000;
+    let high = day + 36 * 3600000;
+    while (low < high) {
+      const middle = Math.floor((low + high) / 2);
+      if (calendarDate(middle) < day) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  }
   const date = new Date(t);
   date.setHours(0, 0, 0, 0);
   date.setDate(date.getDate() - daysBack);
@@ -116,15 +149,15 @@ export function summarizeHourly(
 
 export function summarizeDailyMax(
   rows: readonly HourRow[] | undefined,
-  o: { days: number; now: number; current: number | null },
+  o: { days: number; now: number; current: number | null; timeZone?: string },
 ): MetricHistory {
   const days = Math.max(1, Math.min(30, Math.round(o.days)));
   const history: MetricHistory = { stats: null, series: [], minPoint: null, maxPoint: null };
   let total = 0;
   let count = 0;
   for (let i = days - 1; i >= 0; i--) {
-    const start = localDayStart(o.now, i);
-    const end = localDayStart(o.now, i - 1);
+    const start = localDayStart(o.now, i, o.timeZone);
+    const end = localDayStart(o.now, i - 1, o.timeZone);
     const dayRows = (rows ?? []).filter((r) => start <= r.start && r.start < end)
       .sort((a, b) => a.start - b.start);
     let value: number | null = null;
