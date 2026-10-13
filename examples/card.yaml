@@ -5,79 +5,55 @@
 type: custom:material-plant-card
 entity: plant.orhideea
 name: Orchid
-# Default: grouped metric tiles; change to compact for circular gauges.
+# Default: full tiles; choose compact for circular gauges.
 display_type: full
-show_bars:
-  - moisture
-  - conductivity
-  - temperature
-  - illuminance
-  - humidity
-  - dli
 hide_species: false
 hide_image: false
-# false is the default in both modes. true hides units beside full-mode
-# values, or the entire value text below compact-mode gauges.
+# Optional boolean, default false: true hides units beside full-mode current
+# values and in graph hover bubbles, or complete compact gauge value text.
 hide_units: false
-# Full only: history refreshes every 10 minutes.
-# Optional string: today (default), 24h, 3d, 7d, 14d or 30d.
-# today = midnight in HA's time zone to now; label: Today.
-# Editor: Metrics → History window; per-metric period overrides this.
-history_period: 7d
-# Optional string: summary (default) or graph; per-metric display overrides it.
-full_display: summary
-# History uses recorder statistics, not raw history; generally hourly.
-# Daylight illuminance summaries up to 7 days use 5-minute statistics.
-# Measurements need state_class: measurement; DLI uses hourly recorded states.
-hide_history: false
-# Optional map; all nested keys are optional. Editor: Per-metric settings.
-metrics:
-  dli:
-    # Optional number: 1–30, default 7; today included, partial so far.
-    # 1 = Today; this example shows Daily max · 14 d, one point per day.
-    days: 14
-    # Graph: green in ideal band, red outside; min/max triangles, no average.
-    # Hover or touch/drag inspects points without opening more-info.
-    display: graph
-  illuminance:
-    # Optional boolean, default true: use HA location's sunrise/sunset.
-    daylight_only: true
-    # Optional number: 0–180 minutes, default 30. Golden-hour filter:
-    # sunrise + 45 minutes to sunset − 45 minutes here.
-    # Summary uses 5-minute statistics up to 7 days (cutoff within 5 minutes);
-    # 14/30-day summaries use whole hourly buckets inside the window.
-    # Label: Daylight · 7 d (Daylight · today with the default period).
-    # Graph line includes night readings; min/max triangles use daylight values.
-    # Up to 3 days, daylight_only enables golden-hour boundary icons above
-    # dashed vertical lines styled like the ideal guides.
-    daylight_offset: 45
-  moisture:
-    # Optional string: plant, out_of_range, low, high or never.
-    # Explicit trigger overrides problem_source/problem_sensors.
-    problem_trigger: low
-  temperature:
-    # Optional string: override the built-in icon in either mode.
-    icon: mdi:thermometer-lines
 image: /local/plants/orchid.jpg
 battery_sensor: sensor.sh_5_battery
-# Bare battery glyph turns red below this percentage; otherwise neutral.
+# Optional number, default 10: battery turns red below this percentage.
 battery_warn_level: 10
-# Full-mode non-cumulative values, rings and title icons turn red outside
-# ideal bounds. Only selected problems add the red left accent and tint.
-# DLI's current running total keeps the problem-setting colour.
-# Illuminance outside the daylight window also keeps the problem-setting colour.
-problem_source: plant
-# Empty/omitted allows all measurements; this example selects two.
-problem_sensors:
-  - moisture
-  - dli
-# Compatibility-only keys: accepted and ignored.
-bars_per_row: 6
-show_care: []
-extra_badges: []
+# Optional ordered list; type is required in every entry. Order = display order.
+# Defaults per entry: display summary, problem_trigger plant, period today,
+# days 7, daylight_only true (illuminance only), daylight_offset 30 minutes.
+# Only listed, available metrics can raise measurement-specific problems.
+# Full-mode history is always fetched from recorder statistics; refresh: 10 min.
+metrics:
+  - type: moisture
+    # Optional string: plant, out_of_range, low, high or never; default plant.
+    problem_trigger: low
+    display: summary
+    # Optional string: today, 24h, 3d, 7d, 14d or 30d; default today.
+    period: 7d
+  - type: conductivity
+    problem_trigger: never
+  - type: temperature
+    # Optional string: override the default metric icon in either mode.
+    icon: mdi:thermometer-lines
+    display: graph
+    period: 24h
+    problem_trigger: out_of_range
+  - type: illuminance
+    display: graph
+    period: 3d
+    # Optional boolean, default true: use HA location's sunrise/sunset.
+    daylight_only: true
+    # Optional number: 0–180 minutes, rounded/clamped, default 30.
+    # Statistics/markers include sunrise + 45 min to sunset − 45 min.
+    # The graph line includes night readings; windows up to 3d show boundaries.
+    daylight_offset: 45
+  - type: humidity
+    display: summary
+    period: today
+  - type: dli
+    display: graph
+    # Optional number: 1–30, rounded/clamped, default 7; used instead of period.
+    # Today is included, partial so far; 1 = Today, otherwise Daily max · N d.
+    days: 14
 
-# Compact alternative: paste this block instead of the full-options mapping above.
-# type: custom:material-plant-card
-# entity: plant.orhideea
-# display_type: compact
-# hide_units: false
+# Visual editor: Metrics → Add metric, drag to reorder, Edit or Delete.
+# Compact alternative: change display_type above to compact. Metric order,
+# icons and triggers still apply; history/display settings affect full mode only.
