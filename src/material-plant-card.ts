@@ -8,7 +8,9 @@ import { configForm } from './config-form';
 import { themeTokens } from './theme';
 import './gauge/plant-gauge';
 import './battery/battery-glyph';
-import { fetchHistoryStats, withCurrent, type HistoryRequest, type HistoryResult, type HistoryWindow } from './data/history-stats';
+import { fetchHistory, summarizeHourly, summarizeDailyMax, localDayStart, type HistoryFetch, type RawHistory, type MetricHistory } from './data/history-stats';
+import { resolveMetric, PERIOD_MS } from './calc/metric-settings';
+import { isDaylight } from './calc/sun';
 import { describeWithStats } from './full/metric-row';
 
 const REFRESH_INTERVAL = 5000;
@@ -43,9 +45,9 @@ export class MaterialPlantCard extends LitElement {
   @state() private _info?: PlantInfo;
   @state() private _failedSrc?: string;
   @state() private _gaugeCapacity = 6;
-  @state() private _statsMap: HistoryResult = {
-    range: {}, dailyTotals: {}, daytime: {}, failed: false,
-    failedGroups: { range: false, dailyTotals: false, daytime: false },
+  @state() private _statsMap: RawHistory = {
+    hourly: {}, cumulative: {},
+    failedGroups: { hourly: false, cumulative: false },
   };
   private _statsKey?: string;
   private _statsRequest = 0;
@@ -225,30 +227,32 @@ export class MaterialPlantCard extends LitElement {
     this._syncStats();
   }
 
-  private _historyWindow(): HistoryWindow {
-    return this._config?.history_period === '7d' ? '7d' : '24h';
-  }
-
   private _isCumulative(sensor?: string): boolean {
     const stateClass = sensor ? this.hass?.states[sensor]?.attributes.state_class : undefined;
     return stateClass === 'total' || stateClass === 'total_increasing';
   }
 
-  private _isDaytime(key: string, sensor?: string): boolean {
-    return this._config?.display_type !== 'compact' && this._config?.illuminance_daytime_only !== false &&
-      key === 'illuminance' && !this._isCumulative(sensor);
-  }
-
-  private _statsSensors(): Pick<HistoryRequest, 'range' | 'dailyTotals' | 'daytime'> {
-    const range = new Set<string>();
-    const dailyTotals = new Set<string>();
-    const daytime = new Set<string>();
+  private _statsSensors(now: number): { fetch: HistoryFetch; key: string } {
+    const hourly = new Set<string>();
+    const cumulative = new Set<string>();
+    let periodMs = 0;
+    let days = 1;
+    const settings: unknown[] = [];
     if (this.hass && this._config && this.hass.states[this._config.entity]) {
       for (const m of buildMeasurements(this._info, this._config.show_bars ?? DEFAULT_GAUGES, this.hass.states)) {
-        if (m.sensor) (this._isCumulative(m.sensor) ? dailyTotals : this._isDaytime(m.key, m.sensor) ? daytime : range).add(m.sensor);
+        if (!m.sensor) continue;
+        const r = resolveMetric(this._config, m.key);
+        const daily = this._isCumulative(m.sensor);
+        (daily ? cumulative : hourly).add(m.sensor);
+        if (daily) days = Math.max(days, r.days);
+        else periodMs = Math.max(periodMs, PERIOD_MS[r.period]);
+        settings.push([m.key, m.sensor, daily, r.period, r.days, r.daylightOnly, r.daylightOffset]);
       }
     }
-    return { range: [...range], dailyTotals: [...dailyTotals], daytime: [...daytime] };
+    return {
+      fetch: { hourly: [...hourly], hourlyStart: now - periodMs, cumulative: [...cumulative], cumulativeStart: localDayStart(now, days - 1) },
+      key: JSON.stringify([this._config?.entity, settings, this.hass?.config?.latitude, this.hass?.config?.longitude]),
+    };
   }
 
   private _stopStats(dropMap = false): void {
@@ -260,10 +264,10 @@ export class MaterialPlantCard extends LitElement {
     if (dropMap) {
       this._statsKey = undefined;
       this._statsPending = true;
-      if (Object.keys(this._statsMap.range).length || Object.keys(this._statsMap.dailyTotals).length || Object.keys(this._statsMap.daytime).length) {
+      if (Object.keys(this._statsMap.hourly).length || Object.keys(this._statsMap.cumulative).length) {
         this._statsMap = {
-          range: {}, dailyTotals: {}, daytime: {}, failed: false,
-          failedGroups: { range: false, dailyTotals: false, daytime: false },
+          hourly: {}, cumulative: {},
+          failedGroups: { hourly: false, cumulative: false },
         };
       }
     }
@@ -275,15 +279,13 @@ export class MaterialPlantCard extends LitElement {
       return;
     }
     if (!this.isConnected || !this.hass || !this._info || !this._config) return;
-    const sensors = this._statsSensors();
-    const window = this._historyWindow();
-    const key = JSON.stringify([this._config.entity, window, [...sensors.range].sort(), [...sensors.dailyTotals].sort(), [...sensors.daytime].sort()]);
+    const { fetch: sensors, key } = this._statsSensors(Date.now());
     if (key !== this._statsKey) {
       this._statsKey = key;
       this._statsRequest++;
       this._statsPending = true;
     }
-    if (!sensors.range.length && !sensors.dailyTotals.length && !sensors.daytime.length) {
+    if (!sensors.hourly.length && !sensors.cumulative.length) {
       clearTimeout(this._statsTimer);
       this._statsTimer = undefined;
       return;
@@ -292,7 +294,7 @@ export class MaterialPlantCard extends LitElement {
     const wait = this._statsPending ? Math.max(0, STATS_THROTTLE - elapsed) : Math.max(0, STATS_INTERVAL - elapsed);
     clearTimeout(this._statsTimer);
     this._statsTimer = undefined;
-    if (wait === 0) void this._fetchStats(sensors, window);
+    if (wait === 0) void this._fetchStats(sensors);
     else this._statsTimer = setTimeout(() => {
       this._statsTimer = undefined;
       this._statsPending = true;
@@ -300,22 +302,21 @@ export class MaterialPlantCard extends LitElement {
     }, wait);
   }
 
-  private async _fetchStats(sensors: Pick<HistoryRequest, 'range' | 'dailyTotals' | 'daytime'>, window: HistoryWindow): Promise<void> {
+  private async _fetchStats(sensors: HistoryFetch): Promise<void> {
     const hass = this.hass!;
     const request = ++this._statsRequest;
     this._statsInFlight = request;
     this._statsPending = false;
     this._statsLastFetch = Date.now();
     this._syncStats();
-    const result = await fetchHistoryStats({
+    const result = await fetchHistory({
       callWS: <T>(message: Record<string, unknown>): Promise<T> => hass.callWS<T>(message as { type: string }),
-    }, { ...sensors, window }, this._statsLastFetch);
+    }, sensors, this._statsLastFetch);
     if (request === this._statsRequest && this.isConnected) {
       this._statsMap = {
         ...result,
-        range: result.failedGroups.range ? this._statsMap.range : result.range,
-        dailyTotals: result.failedGroups.dailyTotals ? this._statsMap.dailyTotals : result.dailyTotals,
-        daytime: result.failedGroups.daytime ? this._statsMap.daytime : result.daytime,
+        hourly: result.failedGroups.hourly ? this._statsMap.hourly : result.hourly,
+        cumulative: result.failedGroups.cumulative ? this._statsMap.cumulative : result.cumulative,
       };
     }
     if (this._statsInFlight === request) this._statsInFlight = undefined;
@@ -475,6 +476,8 @@ export class MaterialPlantCard extends LitElement {
     if (!this._config || !this.hass || !changed.has('hass')) return false;
     const old = changed.get('hass') as HomeAssistant | undefined;
     if (!old) return true;
+    if (old.config?.latitude !== this.hass.config?.latitude || old.config?.longitude !== this.hass.config?.longitude ||
+      old.locale?.language !== this.hass.locale?.language || old.language !== this.hass.language) return true;
     const ids = new Set([this._config.entity]);
     if (this._config.battery_sensor) ids.add(this._config.battery_sensor);
     // Track configured metadata sensors even when absent, so a newly added sensor renders.
@@ -498,7 +501,8 @@ export class MaterialPlantCard extends LitElement {
     if (!plant) return html`<ha-card><div class="warning">Entity not available: ${cfg.entity}</div></ha-card>`;
     const compact = cfg.display_type === 'compact';
     const hideUnits = cfg.hide_units ?? false;
-    const measurements = buildMeasurements(this._info, cfg.show_bars ?? DEFAULT_GAUGES, this.hass.states);
+    const iconOverrides = Object.fromEntries(Object.keys(cfg.metrics ?? {}).map((key) => [key, resolveMetric(cfg, key).icon ?? '']));
+    const measurements = buildMeasurements(this._info, cfg.show_bars ?? DEFAULT_GAUGES, this.hass.states, iconOverrides);
     const tooltipIndex = this._tooltip ? Array.from(this.shadowRoot!.querySelectorAll('.gauge-btn')).indexOf(this._tooltip) : -1;
     const tooltipMeasurement = measurements[tooltipIndex];
     const tooltipText = tooltipMeasurement ? tooltipLines(tooltipMeasurement) : undefined;
@@ -545,24 +549,37 @@ export class MaterialPlantCard extends LitElement {
             </button>` : nothing}
         </div>
         ${!compact && measurements.length ? html`<div class="tiles">${measurements.map((m) => {
+          const r = resolveMetric(cfg, m.key);
+          const now = Date.now();
           const cumulative = this._isCumulative(m.sensor);
-          const daytime = this._isDaytime(m.key, m.sensor);
-          const window = this._historyWindow();
-          const stats = cfg.hide_history ? null : cumulative
-            ? (m.sensor ? this._statsMap.dailyTotals[m.sensor] ?? null : null)
-            : withCurrent(m.sensor ? (daytime ? this._statsMap.daytime : this._statsMap.range)[m.sensor] ?? null : null,
-              daytime ? (m.value !== null && m.value > 0 ? m.value : null) : m.value);
+          const lat = this.hass!.config?.latitude;
+          const lon = this.hass!.config?.longitude;
+          const daylight = !cumulative && r.daylightOnly && Number.isFinite(lat) && Number.isFinite(lon);
+          const keep = daylight ? (start: number, end: number) => isDaylight(start, end, lat!, lon!, r.daylightOffset) : undefined;
+          const daylightNow = !keep || keep(now, now);
+          const history: MetricHistory | null = cfg.hide_history ? null : cumulative
+            ? summarizeDailyMax(m.sensor ? this._statsMap.cumulative[m.sensor] : undefined, { days: r.days, now, current: m.value })
+            : summarizeHourly(m.sensor ? this._statsMap.hourly[m.sensor] : undefined,
+              { start: now - r.periodMs, now, current: daylightNow ? m.value : null, keep });
           const problemTone = toneFor(m, problems);
-          const tone = !cumulative && !(daytime && m.value === 0) && (m.status === 'low' || m.status === 'high') ? 'problem' : problemTone;
-          const periodLabel = cumulative ? 'Daily · 7 d' : daytime
-            ? window === '7d' ? 'Daytime · 7 d' : 'Daytime · 24 h'
-            : window === '7d' ? 'Last 7 d' : 'Last 24 h';
-          const period = cumulative ? 'daily totals, last 7 days' :
-            `${daytime ? 'daytime, ' : ''}${window === '7d' ? 'last 7 days' : 'last 24 h'}`;
-          return html`<button class=${`tile-btn${problemTone === 'problem' ? ' problem' : ''}`} type="button" aria-label=${describeWithStats(m, stats, period)}
-            @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}>
-            <mpl-metric-row .measurement=${m} .tone=${tone} .stats=${stats} .periodLabel=${periodLabel} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
-          </button>`;
+          const tone = !cumulative && daylightNow && (m.status === 'low' || m.status === 'high') ? 'problem' : problemTone;
+          const short = r.period === '24h' ? '24 h' : `${parseInt(r.period)} d`;
+          const long = r.period === '24h' ? '24 h' : `${parseInt(r.period)} days`;
+          const periodLabel = cumulative ? r.days === 1 ? 'Today' : `Daily max · ${r.days} d`
+            : `${daylight ? 'Daylight ·' : 'Last'} ${short}`;
+          const periodText = cumulative ? r.days === 1 ? 'today' : `daily maximum, last ${r.days} days`
+            : `${daylight ? 'daylight, ' : ''}last ${long}`;
+          return html`<div class=${`tile${problemTone === 'problem' ? ' problem' : ''}`} role="button" tabindex="0" aria-label=${describeWithStats(m, history?.stats ?? null, periodText)}
+            @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}
+            @keydown=${(event: KeyboardEvent) => {
+              if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
+              if (event.key === ' ') event.preventDefault();
+              this._moreInfo(m.sensor ?? cfg.entity);
+            }}>
+            <mpl-metric-row .measurement=${m} .tone=${tone} .display=${r.display} .history=${history}
+              .periodLabel=${periodLabel} .periodText=${periodText} .daily=${cumulative && r.days > 1}
+              .locale=${this.hass!.locale?.language ?? this.hass!.language} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
+          </div>`;
         })}</div>` : nothing}
         ${compact && measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
           <button class="gauge-btn" type="button" aria-label=${describeMeasurement(m)}
@@ -593,7 +610,7 @@ export class MaterialPlantCard extends LitElement {
     .header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
     .header.no-image { grid-template-columns: minmax(0, 1fr) auto; }
     button { appearance: none; border: 0; margin: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
-    button:focus-visible { outline: 2px solid var(--mpl-primary); outline-offset: 2px; }
+    button:focus-visible, .tile:focus-visible { outline: 2px solid var(--mpl-primary); outline-offset: 2px; }
     .image-btn { position: relative; width: 56px; height: 56px; border-radius: var(--mpl-shape-full); }
     .photo { display: block; width: 100%; height: 100%; object-fit: cover; mask-image: ${unsafeCSS(cookieMask)}; -webkit-mask-image: ${unsafeCSS(cookieMask)}; mask-size: 100% 100%; -webkit-mask-size: 100% 100%; }
     .placeholder { display: grid; place-items: center; background: var(--mpl-secondary-container); color: var(--mpl-on-secondary-container); }
@@ -613,11 +630,11 @@ export class MaterialPlantCard extends LitElement {
     .gauge-btn { -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
     .gauge-btn:active, .text-btn:active { background: color-mix(in srgb, var(--mpl-on-surface) 12%, transparent); }
     .tiles { display: flex; flex-direction: column; gap: var(--mpl-tile-gap); margin-top: var(--mpl-tile-margin); }
-    .tile-btn { width: 100%; text-align: left; padding: var(--mpl-tile-padding); background: var(--mpl-surface-container-high); border-radius: var(--mpl-tile-corner); --mpl-range-bar-ring: var(--mpl-surface-container-high); }
-    .tile-btn.problem { background: linear-gradient(to right, var(--mpl-surface-container-high) 45%, color-mix(in srgb, var(--mpl-error-container) 40%, var(--mpl-surface-container-high))); }
-    .tile-btn:first-child { border-top-left-radius: var(--mpl-tile-outer-corner); border-top-right-radius: var(--mpl-tile-outer-corner); }
-    .tile-btn:last-child { border-bottom-left-radius: var(--mpl-tile-outer-corner); border-bottom-right-radius: var(--mpl-tile-outer-corner); }
-    .tile-btn:hover { background-color: color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-container-high)); }
+    .tile { box-sizing: border-box; width: 100%; text-align: left; cursor: pointer; padding: var(--mpl-tile-padding); background: var(--mpl-surface-container-high); border-radius: var(--mpl-tile-corner); --mpl-range-bar-ring: var(--mpl-surface-container-high); }
+    .tile.problem { background: linear-gradient(to right, var(--mpl-surface-container-high) 45%, color-mix(in srgb, var(--mpl-error-container) 40%, var(--mpl-surface-container-high))); }
+    .tile:first-child { border-top-left-radius: var(--mpl-tile-outer-corner); border-top-right-radius: var(--mpl-tile-outer-corner); }
+    .tile:last-child { border-bottom-left-radius: var(--mpl-tile-outer-corner); border-bottom-right-radius: var(--mpl-tile-outer-corner); }
+    .tile:hover { background-color: color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-container-high)); }
     .warning { color: var(--mpl-error); }
   `];
 }
