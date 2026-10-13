@@ -37,7 +37,7 @@ function fakeHass(data: PlantInfo = info) {
     }
     throw new Error(`Unexpected WebSocket request: ${String(msg.type)}`);
   });
-  return { states, callWS, config: { latitude: 44.43, longitude: 26.13 }, locale: { language: 'en' }, language: 'en' };
+  return { states, callWS, config: { latitude: 44.43, longitude: 26.13, time_zone: undefined as string | undefined }, locale: { language: 'en' }, language: 'en' };
 }
 type FakeHass = ReturnType<typeof fakeHass>;
 function assign(card: MaterialPlantCard, hass: FakeHass): void {
@@ -512,6 +512,54 @@ describe('material-plant-card', () => {
         card.remove();
       });
     }
+
+    for (const [timeZone, expectedStart] of [
+      ['Pacific/Kiritimati', '2026-01-09T10:00:00.000Z'],
+      ['UTC', '2026-01-09T00:00:00.000Z'],
+    ]) {
+      it(`uses ${timeZone} for the seven-day cumulative fetch boundary`, async () => {
+        clockForStats();
+        const hass = fakeHass();
+        hass.config.time_zone = timeZone;
+        hass.states['sensor.dli'] = state('0.7', { state_class: 'total_increasing' });
+        const card = await mount(full({ show_bars: ['dli'] }), hass);
+        expect(calls(hass)[0].args[0].start_time).to.equal(expectedStart);
+        expect(rows(card)[0].timeZone).to.equal(timeZone);
+        card.remove();
+      });
+    }
+
+    it('uses HA day boundaries and refetches a time-zone-only change after throttling', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      hass.config.time_zone = 'Pacific/Kiritimati';
+      hass.states['sensor.dli'] = state('0.7', { state_class: 'total_increasing' });
+      hass.callWS.callsFake(async (msg: Record<string, unknown>) => {
+        if (msg.type === 'plant/get_info') return { result: info };
+        return { 'sensor.dli': [
+          { start: Date.UTC(2026, 0, 15, 1), end: Date.UTC(2026, 0, 15, 2), state: 9 },
+          { start: Date.UTC(2026, 0, 15, 11), end: Date.UTC(2026, 0, 15, 12), state: 3 },
+        ] };
+      });
+      const card = await mount(full({ show_bars: ['dli'], metrics: { dli: { days: 1 } } }), hass);
+      expect(calls(hass)).to.have.length(1);
+      expect(calls(hass)[0].args[0].start_time).to.equal('2026-01-15T10:00:00.000Z');
+      expect(rows(card)[0].history?.stats?.max).to.equal(3);
+      expect(rows(card)[0].timeZone).to.equal('Pacific/Kiritimati');
+
+      // Preserve entity identities: only the HA configuration changes.
+      assign(card, { ...hass, config: { ...hass.config, time_zone: 'UTC' } });
+      await settle(card);
+      expect(rows(card)[0].timeZone).to.equal('UTC');
+      expect(rows(card)[0].history?.stats?.max).to.equal(9);
+      await clock.tickAsync(59999);
+      expect(calls(hass)).to.have.length(1);
+      await clock.tickAsync(1);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      expect(calls(hass)[1].args[0].start_time).to.equal('2026-01-15T00:00:00.000Z');
+      card.remove();
+    });
 
     it('fetches seven-day ranges and refetches a changed window after the throttle', async () => {
       const clock = clockForStats();

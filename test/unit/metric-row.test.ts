@@ -369,6 +369,28 @@ describe('mpl-metric-row graph display', () => {
     expect(graph(el).points[0].label).to.match(/ · 0\.04$/);
   });
 
+  it('formats hourly, multi-day and daily labels in the supplied HA time zone', async () => {
+    const timestamp = Date.UTC(2026, 6, 15, 21, 30);
+    const el = await graphRow(moisture, { ...history, series: [{ t: timestamp, v: 12 }] });
+    el.timeZone = 'Europe/Bucharest';
+    await el.updateComplete;
+    expect(graph(el).points[0].label).to.equal('00:30 · 12 %');
+    el.timeZone = 'UTC';
+    await el.updateComplete;
+    expect(graph(el).points[0].label).to.equal('21:30 · 12 %');
+
+    el.timeZone = 'Europe/Bucharest';
+    el.history = { ...history, series: [{ t: timestamp, v: 12 }, { t: timestamp + 48 * hour, v: 31 }] };
+    await el.updateComplete;
+    expect(graph(el).points[0].label).to.equal('Thu 00:30 · 12 %');
+    el.daily = true;
+    await el.updateComplete;
+    expect(graph(el).points[0].label).to.equal('Thu, 16 Jul · 12 %');
+    el.timeZone = 'UTC';
+    await el.updateComplete;
+    expect(graph(el).points[0].label).to.equal('Wed, 15 Jul · 12 %');
+  });
+
   it('keeps empty graphs and omits unmappable markers and current', async () => {
     for (const data of [null, withStats(null)]) {
       const before = Date.now();

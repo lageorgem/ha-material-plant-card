@@ -40,6 +40,7 @@ export class MplMetricRow extends LitElement {
   @property({ type: Boolean }) daily = false;
   @property() periodText = 'last 24 h';
   @property() locale?: string;
+  @property({ attribute: 'time-zone' }) timeZone?: string;
   @property({ type: Boolean, attribute: 'hide-units' }) hideUnits = false;
   @property({ type: Boolean, attribute: 'show-history' }) showHistory = true;
   @property({ type: String, attribute: 'period-label' }) periodLabel = 'Last 24 h';
@@ -62,11 +63,12 @@ export class MplMetricRow extends LitElement {
       const last = series[series.length - 1];
       const end = last?.t ?? Date.now();
       const start = series[0]?.t ?? end - 86400000;
-      const formatter = new Intl.DateTimeFormat(this.locale, this.daily
+      const timeOptions: Intl.DateTimeFormatOptions = this.daily
         ? { weekday: 'short', day: 'numeric', month: 'short' }
         : end - start <= 86400000
           ? { hour: '2-digit', minute: '2-digit' }
-          : { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+          : { weekday: 'short', hour: '2-digit', minute: '2-digit' };
+      const formatter = new Intl.DateTimeFormat(this.locale, { ...timeOptions, timeZone: this.timeZone });
       const displayUnit = displayUnits[m.unit] ?? m.unit;
       const points = series.map(({ t, v }) => ({
         t, f: fraction(v),

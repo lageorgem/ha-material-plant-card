@@ -271,6 +271,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   private _statsSensors(now: number): { fetch: HistoryFetch; key: string } {
+    const tz = typeof this.hass?.config?.time_zone === 'string' ? this.hass.config.time_zone : undefined;
     const hourly = new Set<string>();
     const cumulative = new Set<string>();
     let periodMs = 0;
@@ -288,8 +289,8 @@ export class MaterialPlantCard extends LitElement {
       }
     }
     return {
-      fetch: { hourly: [...hourly], hourlyStart: now - periodMs, cumulative: [...cumulative], cumulativeStart: localDayStart(now, days - 1) },
-      key: JSON.stringify([this._config?.entity, settings, this.hass?.config?.latitude, this.hass?.config?.longitude]),
+      fetch: { hourly: [...hourly], hourlyStart: now - periodMs, cumulative: [...cumulative], cumulativeStart: localDayStart(now, days - 1, tz) },
+      key: JSON.stringify([this._config?.entity, settings, this.hass?.config?.latitude, this.hass?.config?.longitude, tz]),
     };
   }
 
@@ -521,6 +522,7 @@ export class MaterialPlantCard extends LitElement {
     const old = changed.get('hass') as HomeAssistant | undefined;
     if (!old) return true;
     if (old.config?.latitude !== this.hass.config?.latitude || old.config?.longitude !== this.hass.config?.longitude ||
+      old.config?.time_zone !== this.hass.config?.time_zone ||
       old.locale?.language !== this.hass.locale?.language || old.language !== this.hass.language) return true;
     const ids = new Set([this._config.entity]);
     if (this._config.battery_sensor) ids.add(this._config.battery_sensor);
@@ -541,6 +543,7 @@ export class MaterialPlantCard extends LitElement {
   protected render() {
     if (!this._config || !this.hass) return nothing;
     const cfg = this._config;
+    const tz = typeof this.hass.config?.time_zone === 'string' ? this.hass.config.time_zone : undefined;
     const plant = this.hass.states[cfg.entity];
     if (!plant) return html`<ha-card><div class="warning">Entity not available: ${cfg.entity}</div></ha-card>`;
     const compact = cfg.display_type === 'compact';
@@ -602,7 +605,7 @@ export class MaterialPlantCard extends LitElement {
           const keep = daylight ? (start: number, end: number) => isDaylight(start, end, lat!, lon!, r.daylightOffset) : undefined;
           const daylightNow = !keep || keep(now, now);
           const history: MetricHistory | null = cfg.hide_history ? null : cumulative
-            ? summarizeDailyMax(m.sensor ? this._statsMap.cumulative[m.sensor] : undefined, { days: r.days, now, current: m.value })
+            ? summarizeDailyMax(m.sensor ? this._statsMap.cumulative[m.sensor] : undefined, { days: r.days, now, current: m.value, timeZone: tz })
             : summarizeHourly(m.sensor ? this._statsMap.hourly[m.sensor] : undefined,
               { start: now - r.periodMs, now, current: daylightNow ? m.value : null, keep });
           const problemTone = toneFor(m, problems);
@@ -624,7 +627,7 @@ export class MaterialPlantCard extends LitElement {
             }}>
             <mpl-metric-row .measurement=${m} .tone=${tone} .display=${r.display} .history=${history}
               .periodLabel=${periodLabel} .periodText=${periodText} .daily=${cumulative && r.days > 1}
-              .locale=${this.hass!.locale?.language ?? this.hass!.language} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
+              .locale=${this.hass!.locale?.language ?? this.hass!.language} .timeZone=${tz} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
           </div>`;
         })}</div>` : nothing}
         ${compact && measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
