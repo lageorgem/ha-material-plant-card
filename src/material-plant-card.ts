@@ -50,6 +50,7 @@ export class MaterialPlantCard extends LitElement {
   };
   private _statsKey?: string;
   private _statsRequest = 0;
+  private _statsAppliedRequest = 0;
   private _statsLastFetch = -Infinity;
   private _statsPending = true;
   private _statsInFlight?: number;
@@ -60,6 +61,7 @@ export class MaterialPlantCard extends LitElement {
   private _imageSrc?: string;
   private _lastFetch = -Infinity;
   private _request = 0;
+  private _appliedRequest = 0;
   private _inFlight?: number;
   private _timer?: ReturnType<typeof setTimeout>;
   private _pending = false;
@@ -317,7 +319,7 @@ export class MaterialPlantCard extends LitElement {
   private _stopStats(dropMap = false): void {
     clearTimeout(this._statsTimer);
     this._statsTimer = undefined;
-    this._statsRequest++;
+    this._statsAppliedRequest = ++this._statsRequest;
     this._statsPending ||= this._statsInFlight !== undefined;
     this._statsInFlight = undefined;
     if (dropMap) {
@@ -341,7 +343,7 @@ export class MaterialPlantCard extends LitElement {
     const { fetch: sensors, key } = this._statsSensors(Date.now());
     if (key !== this._statsKey) {
       this._statsKey = key;
-      this._statsRequest++;
+      this._statsAppliedRequest = ++this._statsRequest;
       this._statsPending = true;
     }
     if (!sensors.hourly.length && !sensors.cumulative.length && !sensors.fine.length) {
@@ -371,13 +373,14 @@ export class MaterialPlantCard extends LitElement {
     const result = await fetchHistory({
       callWS: <T>(message: Record<string, unknown>): Promise<T> => hass.callWS<T>(message as { type: string }),
     }, sensors, this._statsLastFetch);
-    if (request === this._statsRequest && this.isConnected) {
+    if (request > this._statsAppliedRequest && this.isConnected) {
       this._statsMap = {
         ...result,
         hourly: result.failedGroups.hourly ? this._statsMap.hourly : result.hourly,
         cumulative: result.failedGroups.cumulative ? this._statsMap.cumulative : result.cumulative,
         fine: result.failedGroups.fine ? this._statsMap.fine : result.fine,
       };
+      this._statsAppliedRequest = request;
     }
     if (this._statsInFlight === request) this._statsInFlight = undefined;
     this._syncStats();
@@ -410,13 +413,12 @@ export class MaterialPlantCard extends LitElement {
       metrics: normalizeMetrics(config).map(entry => ({ ...entry })) };
     if (this._gaugesInnerWidth !== undefined) this._gaugeCapacity = this._capacityForWidth(this._gaugesInnerWidth);
     this._dismissTooltip();
-    this._statsRequest++;
     this._statsPending = true;
     if (changedEntity || config.display_type === 'compact') this._stopStats(true);
     if (changedEntity) {
       this._info = undefined;
       // Invalidate the old entity even when hass has not arrived yet.
-      this._request++;
+      this._appliedRequest = ++this._request;
       this._queueFetch();
     }
     this._syncStats();
@@ -444,8 +446,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   private _queueFetch(): void {
-    // New demand supersedes in-flight responses, including during the throttle window.
-    this._request++;
+    // Demand schedules a refresh without invalidating useful in-flight metadata.
     this._pending = true;
     if (!this.isConnected || !this.hass || !this._config) return;
     const wait = Math.max(0, REFRESH_INTERVAL - (Date.now() - this._lastFetch));
@@ -471,8 +472,9 @@ export class MaterialPlantCard extends LitElement {
     this._inFlight = request;
     try {
       const response = await hass.callWS<{ result: PlantInfo }>({ type: 'plant/get_info', entity_id: entity });
-      if (request === this._request && entity === this._config?.entity && response?.result) {
+      if (request > this._appliedRequest && entity === this._config?.entity && response?.result) {
         this._info = response.result;
+        this._appliedRequest = request;
       }
     } catch {
       // Integration can be starting up/offline. Preserve last good metadata and live readings.
@@ -518,7 +520,7 @@ export class MaterialPlantCard extends LitElement {
     // A cancelled trailing fetch or invalidated response still needs replacement.
     this._pending ||= this._inFlight !== undefined;
     this._inFlight = undefined;
-    this._request++;
+    this._appliedRequest = ++this._request;
   }
 
   private get _gaugeSize(): number {

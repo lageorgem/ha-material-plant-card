@@ -1037,6 +1037,59 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
+    it('applies in-flight history after same-key config demand and keeps the trailing refresh', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      let resolve!: (value: Record<string, { start: number; end: number; min: number; max: number; mean: number }[]>) => void;
+      hass.callWS.onSecondCall().returns(new Promise((done) => { resolve = done; }));
+      const config = full({ show_bars: ['moisture'] });
+      const card = await mount(config, hass);
+      card.setConfig({ ...config, name: 'Renamed' });
+      await settle(card);
+      resolve({ 'sensor.moisture': [{ start: Date.now() - 3600000, end: Date.now(), min: 1, max: 99, mean: 50 }] });
+      await settle(card);
+      expect(rows(card)[0].history?.stats).to.deep.equal({ min: 1, max: 99, mean: 50 });
+      expect(calls(hass)).to.have.length(1);
+      await clock.tickAsync(59999);
+      expect(calls(hass)).to.have.length(1);
+      await clock.tickAsync(1);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      card.remove();
+    });
+
+    for (const order of ['older first', 'newer first']) {
+      it(`orders overlapping same-key history responses (${order})`, async () => {
+        const clock = clockForStats();
+        const hass = fakeHass();
+        type Response = Record<string, { start: number; end: number; min: number; max: number; mean: number }[]>;
+        let resolveOld!: (value: Response) => void;
+        let resolveNew!: (value: Response) => void;
+        hass.callWS.onSecondCall().returns(new Promise((resolve) => { resolveOld = resolve; }));
+        hass.callWS.onThirdCall().returns(new Promise((resolve) => { resolveNew = resolve; }));
+        const card = await mount(full({ show_bars: ['moisture'] }), hass);
+        await clock.tickAsync(600000);
+        expect(calls(hass)).to.have.length(2);
+        const response = (mean: number): Response => ({ 'sensor.moisture': [
+          { start: Date.now() - 3600000, end: Date.now(), min: 1, max: 99, mean },
+        ] });
+        if (order === 'older first') {
+          resolveOld(response(40));
+          await settle(card);
+          expect(rows(card)[0].history?.stats?.mean).to.equal(40);
+        }
+        resolveNew(response(60));
+        await settle(card);
+        expect(rows(card)[0].history?.stats?.mean).to.equal(60);
+        if (order === 'newer first') {
+          resolveOld(response(40));
+          await settle(card);
+          expect(rows(card)[0].history?.stats?.mean).to.equal(60);
+        }
+        card.remove();
+      });
+    }
+
     it('coalesces rapid configs and ignores stale history responses', async () => {
       const clock = clockForStats();
       const hass = fakeHass();
@@ -1739,9 +1792,10 @@ describe('material-plant-card', () => {
     hass.callWS.onSecondCall().resolves({ result: { temperature: info.temperature } });
     const card = await mount(cfg(), hass);
     card.setConfig(cfg({ entity: 'plant.other' }));
-    await clock.tickAsync(5000);
-    await settle(card);
     resolveOld({ result: info });
+    await settle(card);
+    expect(gauges(card)).to.have.length(0);
+    await clock.tickAsync(5000);
     await settle(card);
     expect(gauges(card)).to.have.length(1);
     expect(gauges(card)[0]).to.have.property('label').that.matches(/^Temperature:/);
@@ -1749,7 +1803,7 @@ describe('material-plant-card', () => {
   });
 
   for (const timing of ['during the throttle window', 'after the trailing response']) {
-    it(`ignores an old same-entity response ${timing}`, async () => {
+    it(`${timing === 'during the throttle window' ? 'applies' : 'ignores'} an old same-entity response ${timing}`, async () => {
       const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
       const hass = fakeHass({ temperature: info.temperature });
       let resolveOld!: (response: { result: PlantInfo }) => void;
@@ -1769,7 +1823,8 @@ describe('material-plant-card', () => {
       }
       expect(hass.callWS.callCount).to.equal(2);
       expect(gauges(card)).to.have.length(1);
-      expect(gauges(card)[0]).to.have.property('label').that.matches(/^Temperature:/);
+      expect(gauges(card)[0]).to.have.property('label').that.matches(
+        timing === 'during the throttle window' ? /^Conductivity:/ : /^Temperature:/);
       await clock.tickAsync(4000);
       await settle(card);
       expect(hass.callWS.callCount).to.equal(3);
@@ -1782,6 +1837,30 @@ describe('material-plant-card', () => {
         expect(gauges(card)).to.have.length(1);
         expect(gauges(card)[0]).to.have.property('label').that.matches(/^Moisture:/);
       }
+      card.remove();
+    });
+  }
+
+  for (const display_type of ['full', 'compact'] as const) {
+    it(`renders the first ${display_type} response before the trailing throttle despite startup state updates`, async () => {
+      const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+      const hass = fakeHass();
+      let resolveFirst!: (response: { result: PlantInfo }) => void;
+      hass.callWS.onFirstCall().returns(new Promise((resolve) => { resolveFirst = resolve; }));
+      const card = await mount(cfg({ display_type, show_bars: ['moisture'] }), hass);
+      expect(query(card, display_type === 'full' ? '.tile' : '.gauge-btn')).to.equal(null);
+      assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, '1') } });
+      await settle(card);
+      resolveFirst({ result: info });
+      await settle(card);
+      expect(query(card, display_type === 'full' ? '.tile' : '.gauge-btn')).to.exist;
+      const infoCalls = () => hass.callWS.getCalls().filter(call => call.args[0].type === 'plant/get_info');
+      expect(infoCalls()).to.have.length(1);
+      await clock.tickAsync(4999);
+      expect(infoCalls()).to.have.length(1);
+      await clock.tickAsync(1);
+      await settle(card);
+      expect(infoCalls()).to.have.length(2);
       card.remove();
     });
   }
