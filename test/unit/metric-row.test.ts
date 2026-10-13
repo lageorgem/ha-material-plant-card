@@ -64,8 +64,37 @@ describe('mpl-metric-row', () => {
   it('formats compact ideal and history numbers', async () => {
     const el = await row({ ...moisture, min: 1500, max: 25000 }, { min: 1, mean: 1.2, max: 1.37 });
     expect(element(el, '.ideal').textContent).to.equal('Ideal 1.5k–25k');
-    expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(['1', '1.2', '1.4']);
+    expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(['1', '1.2', '1.37']);
   });
+
+  for (const [value, expected] of [
+    [19.5, '19.5'], [21.25, '21.3'], [1450, '1.5k'], [0.07, '0.07'], [57, '57'],
+  ] as const) {
+    it(`formats all summary badges for ${value} with card-value precision`, async () => {
+      const el = await row(moisture, { min: value, mean: value, max: value });
+      expect(badges(el).map(stat => stat.children[1].textContent))
+        .to.deep.equal([expected, expected, expected]);
+    });
+  }
+
+  for (const scenario of [
+    { name: 'temperature', min: 15, max: 30,
+      stats: { min: 19.5, mean: 21.3, max: 23.7 }, values: ['19.5', '21.3', '23.7'], out: false },
+    { name: 'all-out VPD', min: 1.2, max: 1.6,
+      stats: { min: 0.95, mean: 1.15, max: 1.75 }, values: ['0.95', '1.15', '1.75'], out: true },
+  ]) {
+    it(`fits precise ${scenario.name} badges in a 271px row`, async () => {
+      const el = await row({ ...moisture, min: scenario.min, max: scenario.max }, scenario.stats);
+      el.style.width = '271px';
+      el.style.fontFamily = 'Arial, sans-serif';
+      expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(scenario.values);
+      expect(badges(el).every(stat => stat.classList.contains('out') === scenario.out)).to.equal(true);
+      for (const content of [element(el, '.stats'), ...badges(el)]) {
+        expect(content.scrollWidth).to.be.at.most(content.clientWidth);
+      }
+      expect(el.scrollWidth).to.be.at.most(el.clientWidth);
+    });
+  }
 
   it('defaults the period label and reactively renders custom labels only with history', async () => {
     const el = await row();

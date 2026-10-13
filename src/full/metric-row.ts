@@ -50,7 +50,7 @@ export class MplMetricRow extends LitElement {
     const stat = (label: string, value: number | null): TemplateResult => {
       const status = gaugeStatus(value, m.min, m.max);
       return html`<span class=${status === 'low' || status === 'high' ? 'stat out' : 'stat'}>
-        <span class="stat-label">${label}</span><span class="stat-value">${value === null ? '—' : formatCaptionNumber(value)}</span>
+        <span class="stat-label">${label}</span><span class="stat-value">${value === null ? '—' : formatValue(value, '', true)}</span>
       </span>`;
     };
     const graph = (): TemplateResult => {
@@ -137,9 +137,9 @@ export class MplMetricRow extends LitElement {
       --mpl-metric-period-line: 16px;
       --mpl-metric-stat-size: 11px;
       --mpl-metric-stat-line: 16px;
-      --mpl-metric-stat-gap: 3px;
+      --mpl-metric-stat-gap: 2px;
       --mpl-metric-stats-gap: 4px;
-      --mpl-metric-stat-padding: 6px;
+      --mpl-metric-stat-padding: 4px;
       --mpl-metric-stat-radius: 6px;
       --mpl-metric-stat-label-weight: 400;
       --mpl-metric-stat-value-weight: 600;
