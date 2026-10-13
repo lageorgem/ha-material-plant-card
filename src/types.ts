@@ -41,6 +41,10 @@ export interface MaterialPlantCardConfig {
   name?: string;
   // 'full' = metric tiles (default); 'compact' = gauges.
   display_type?: 'full' | 'compact';
+  // Compact only: 1..12 gauges per row; absent/invalid uses automatic balancing.
+  gauges_per_row?: number;
+  // Compact only: gauge diameter in px, clamped to 32..96; defaults to 44.
+  gauge_size?: number;
   show_bars?: string[];
   hide_species?: boolean;
   hide_image?: boolean;

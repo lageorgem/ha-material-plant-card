@@ -2031,6 +2031,91 @@ describe('material-plant-card', () => {
     });
   }
 
+  describe('compact gauge layout settings', () => {
+    const rowCounts = (card: MaterialPlantCard) => {
+      const tops = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')].map(button => button.offsetTop);
+      return [...new Set(tops)].map(top => tops.filter(value => value === top).length);
+    };
+
+    for (const [width, perRow, expected] of [
+      [327, 3, [3, 3]], [327, 4, [4, 2]], [240, 6, [3, 3]],
+      [327, 1, [1, 1, 1, 1, 1, 1]], [327, 12, [6]],
+    ] as const) {
+      it(`lays out six gauges with gauges_per_row=${perRow} at ${width}px`, async () => {
+        const card = await mount(cfg({ gauges_per_row: perRow }));
+        card.style.width = `${width}px`;
+        await settleLayout(card);
+        expect(rowCounts(card)).to.deep.equal([...expected]);
+        const buttons = [...card.shadowRoot!.querySelectorAll<HTMLButtonElement>('.gauge-btn')];
+        const lastRow = buttons.filter(button => button.offsetTop === buttons[buttons.length - 1].offsetTop);
+        const bounds = query(card, '.gauges').getBoundingClientRect();
+        expect(lastRow[0].getBoundingClientRect().left - bounds.left)
+          .to.be.closeTo(bounds.right - lastRow[lastRow.length - 1].getBoundingClientRect().right, 2);
+        for (const gauge of gauges(card)) {
+          expect(gauge.getBoundingClientRect().left).to.be.at.least(bounds.left - 0.5);
+          expect(gauge.getBoundingClientRect().right).to.be.at.most(bounds.right + 0.5);
+        }
+        card.remove();
+      });
+    }
+
+    for (const value of [0, 13, 3.5, NaN, Infinity, 'x']) {
+      it(`ignores invalid gauges_per_row=${String(value)} and legacy bars_per_row`, async () => {
+        const card = await mount(cfg({ gauges_per_row: value as number, bars_per_row: 3 }));
+        card.style.width = '327px';
+        await settleLayout(card);
+        expect(rowCounts(card)).to.deep.equal([6]);
+        expect(query(card, '.gauges').style.getPropertyValue('--mpl-gauge-size')).to.equal('44px');
+        card.remove();
+      });
+    }
+
+    it('recomputes capacity from gauge size without requiring a width change', async () => {
+      const card = await mount();
+      card.style.width = '327px';
+      await settleLayout(card);
+      expect(rowCounts(card)).to.deep.equal([6]);
+      card.setConfig(cfg({ gauge_size: 64, gauges_per_row: 6 }));
+      await settleLayout(card);
+      expect(query(card, '.gauges').style.getPropertyValue('--mpl-gauge-size')).to.equal('64px');
+      expect(rowCounts(card)).to.deep.equal([3, 3]);
+      expect(card.getCardSize()).to.equal(5);
+      // 3 * 68 - 4 = 200px inner width: just below this, capacity drops to two.
+      card.style.width = '231px';
+      await settleLayout(card);
+      expect(rowCounts(card)).to.deep.equal([2, 2, 2]);
+      card.style.width = '232px';
+      await settleLayout(card);
+      expect(rowCounts(card)).to.deep.equal([3, 3]);
+      card.setConfig(cfg());
+      card.style.width = '327px';
+      await settleLayout(card);
+      expect(rowCounts(card)).to.deep.equal([6]);
+      expect(query(card, '.gauges').style.getPropertyValue('--mpl-gauge-size')).to.equal('44px');
+      card.remove();
+    });
+
+    for (const [value, size, cardSize] of [
+      [20, 32, 4], [0, 32, 4], [120, 96, 5], [52, 52, 4], [53, 53, 5],
+      [NaN, 44, 4], [Infinity, 44, 4], ['x', 44, 4],
+    ] as const) {
+      it(`normalizes gauge_size=${String(value)} to ${size}px`, async () => {
+        const card = await mount(cfg({ gauge_size: value as number }));
+        expect(query(card, '.gauges').style.getPropertyValue('--mpl-gauge-size')).to.equal(`${size}px`);
+        expect(card.getCardSize()).to.equal(cardSize);
+        card.remove();
+      });
+    }
+
+    it('does not apply compact settings in full mode', async () => {
+      const card = await mount(cfg({ display_type: 'full', gauges_per_row: 1, gauge_size: 96 }));
+      expect(query(card, '.gauges')).to.equal(null);
+      expect(card.shadowRoot!.querySelectorAll('.tile')).to.have.length(6);
+      expect(card.getCardSize()).to.equal(Math.ceil((100 + 6 * 86) / 50));
+      card.remove();
+    });
+  });
+
   it('rebalances six gauges from one row to 3/3 when resized from 327px to 240px', async () => {
     const container = await fixture<HTMLDivElement>(html`<div style="width:327px"><material-plant-card></material-plant-card></div>`);
     const card = container.firstElementChild as MaterialPlantCard;

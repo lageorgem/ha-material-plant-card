@@ -56,6 +56,7 @@ export class MaterialPlantCard extends LitElement {
   private _statsTimer?: ReturnType<typeof setTimeout>;
   private _gaugesObserver?: ResizeObserver;
   private _gaugesFrame?: number;
+  private _gaugesInnerWidth?: number;
   private _imageSrc?: string;
   private _lastFetch = -Infinity;
   private _request = 0;
@@ -407,6 +408,7 @@ export class MaterialPlantCard extends LitElement {
     const changedEntity = this._config?.entity !== config.entity;
     this._config = { ...config, show_bars: config.show_bars ? [...config.show_bars] : undefined,
       metrics: normalizeMetrics(config).map(entry => ({ ...entry })) };
+    if (this._gaugesInnerWidth !== undefined) this._gaugeCapacity = this._capacityForWidth(this._gaugesInnerWidth);
     this._dismissTooltip();
     this._statsRequest++;
     this._statsPending = true;
@@ -421,7 +423,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   public getCardSize(): number {
-    if (this._config?.display_type === 'compact') return 4;
+    if (this._config?.display_type === 'compact') return this._gaugeSize <= 52 ? 4 : 5;
     const n = this.hass && this._config && this.hass.states[this._config.entity]
       ? buildMeasurements(this._info, normalizeMetrics(this._config).map(entry => entry.type), this.hass.states).length : 0;
     return Math.ceil((100 + n * 86) / 50);
@@ -519,6 +521,15 @@ export class MaterialPlantCard extends LitElement {
     this._request++;
   }
 
+  private get _gaugeSize(): number {
+    const size = this._config?.gauge_size;
+    return typeof size === 'number' && Number.isFinite(size) ? Math.max(32, Math.min(96, size)) : 44;
+  }
+
+  private _capacityForWidth(innerWidth: number): number {
+    return Math.max(1, Math.floor((innerWidth + 4) / (this._gaugeSize + 4)));
+  }
+
   private _observeGauges(): void {
     if (!this.isConnected || this._gaugesObserver) return;
     this._gaugesObserver = new ResizeObserver((entries) => {
@@ -526,12 +537,12 @@ export class MaterialPlantCard extends LitElement {
         if (!this.isConnected || entry.target !== this) continue;
         if (this._gaugesFrame !== undefined) cancelAnimationFrame(this._gaugesFrame);
         this._gaugesFrame = undefined;
-        const innerWidth = entry.contentRect.width - 32;
-        const capacity = Math.max(1, Math.floor((innerWidth + 4) / 48));
+        this._gaugesInnerWidth = entry.contentRect.width - 32;
         // Host height can change with the rows. Defer writes beyond observer delivery.
         this._gaugesFrame = requestAnimationFrame(() => {
           this._gaugesFrame = undefined;
           if (!this.isConnected) return;
+          const capacity = this._capacityForWidth(this._gaugesInnerWidth!);
           if (capacity !== this._gaugeCapacity) this._gaugeCapacity = capacity;
           if (this._tooltip) this._positionTooltip();
         });
@@ -580,7 +591,11 @@ export class MaterialPlantCard extends LitElement {
     const tooltipText = tooltipMeasurement ? tooltipLines(tooltipMeasurement) : undefined;
     const n = measurements.length;
     const rows = Math.ceil(n / this._gaugeCapacity);
-    const columns = n ? Math.ceil(n / rows) : 1;
+    const perRow = cfg.gauges_per_row;
+    const requestedColumns = typeof perRow === 'number' && Number.isInteger(perRow) && perRow >= 1 && perRow <= 12
+      ? Math.min(perRow, n) : undefined;
+    const columns = n ? requestedColumns !== undefined && requestedColumns <= this._gaugeCapacity
+      ? requestedColumns : Math.ceil(n / rows) : 1;
     const problems = activeProblems(plant, measurements, cfg);
     const name = cfg.name || plant.attributes.friendly_name || cfg.entity;
     const subtitle = problems.length
@@ -672,7 +687,7 @@ export class MaterialPlantCard extends LitElement {
                .locale=${this.hass!.locale?.language ?? this.hass!.language} .timeZone=${tz} .hideUnits=${hideUnits}></mpl-metric-row>
           </div>`;
         })}</div>` : nothing}
-        ${compact && measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}`}>${measurements.map((m) => html`
+        ${compact && measurements.length ? html`<div class="gauges" style=${`--mpl-cols: ${columns}; --mpl-gauge-size: ${this._gaugeSize}px`}>${measurements.map((m) => html`
           <button class="gauge-btn" type="button" aria-label=${describeMeasurement(m)}
             @pointerdown=${this._gaugePointerDown} @pointerenter=${this._gaugePointerEnter} @pointerleave=${this._gaugePointerLeave}
             @focus=${this._gaugeFocus} @blur=${this._gaugeBlur}
