@@ -250,7 +250,7 @@ export class MplHistoryGraph extends LitElement {
         ${[high, low].filter(f => f !== null).map(f => svg`<line class="threshold-guide" x1="0" x2=${this._width}
           y1=${y(f)} y2=${y(f)} stroke="var(--mpl-outline)" opacity="1" stroke-width="1" stroke-dasharray="3 3"></line>`)}
         ${events.map(event => svg`<line class="event-line" x1=${this._x(event.t)} x2=${this._x(event.t)}
-          y1="0" y2=${HEIGHT} stroke="var(--mpl-outline)" stroke-width="1" stroke-dasharray="1 3" opacity="0.8"></line>`)}
+          y1="16" y2=${HEIGHT} stroke="var(--mpl-outline)" stroke-width="1" stroke-dasharray="3 3" opacity="1"></line>`)}
         <path class="history-line" d=${path.trim()} fill="none" stroke=${gradient} stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"></path>
         ${isolated.map(point => svg`<circle class="isolated-point" cx=${this._x(point.t)} cy=${y(point.f!)}

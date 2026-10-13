@@ -201,7 +201,7 @@ describe('mpl-history-graph', () => {
     });
   }
 
-  it('draws in-domain event lines beneath the history and clamps top-edge icons inside the host', async () => {
+  it('matches event lines to horizontal guides beneath the history with clamped icons above them', async () => {
     const el = await mount();
     expect(el.shadowRoot!.querySelector('.event-line, .event-icon')).to.equal(null);
     el.events = [
@@ -217,16 +217,18 @@ describe('mpl-history-graph', () => {
     expect(lines.length).to.equal(3);
     expect(icons.length).to.equal(3);
     const host = el.getBoundingClientRect();
+    const guideStyle = getComputedStyle(node(el, '.threshold-guide'));
     for (const [index, x] of [0, 120, 240].entries()) {
       const line = lines[index];
       expect(line.x1.baseVal.value).to.equal(x);
       expect(line.x2.baseVal.value).to.equal(x);
-      expect(line.y1.baseVal.value).to.equal(0);
+      expect(line.y1.baseVal.value).to.equal(16);
       expect(line.y2.baseVal.value).to.equal(48);
-      expect(line.getAttribute('stroke-dasharray')).to.equal('1 3');
-      expect(line.getAttribute('stroke-width')).to.equal('1');
-      expect(getComputedStyle(line).stroke).to.equal('rgb(155, 143, 128)');
-      expect(getComputedStyle(line).opacity).to.equal('0.8');
+      const lineStyle = getComputedStyle(line);
+      expect(lineStyle.stroke).to.equal(guideStyle.stroke);
+      expect(lineStyle.strokeDasharray).to.equal(guideStyle.strokeDasharray);
+      expect(lineStyle.strokeWidth).to.equal(guideStyle.strokeWidth);
+      expect(lineStyle.opacity).to.equal(guideStyle.opacity);
       expect(line.compareDocumentPosition(node(el, '.history-line')) & Node.DOCUMENT_POSITION_FOLLOWING).not.to.equal(0);
       const icon = icons[index];
       expect(icon.tagName.toLowerCase()).to.equal('ha-icon');
@@ -237,6 +239,7 @@ describe('mpl-history-graph', () => {
       expect(rect.width).to.equal(14);
       expect(rect.height).to.equal(14);
       expect(rect.top).to.be.closeTo(host.top, 0.001);
+      expect(rect.bottom).to.be.at.most(line.getBoundingClientRect().top);
       expect(rect.left).to.be.at.least(host.left);
       expect(rect.right).to.be.at.most(host.right);
       expect(rect.left - host.left + 7).to.equal(Math.max(7, Math.min(233, x)));
