@@ -13,6 +13,44 @@ describe('niceStep', () => {
 });
 
 describe('graphScale', () => {
+  it('preserves two decimal places for narrow VPD observations', () => {
+    const labels = graphScale([1.06, 1.11], null, null).ticks.map(tick => tick.label);
+    expect(new Set(labels).size).to.equal(labels.length);
+    for (const label of labels) expect(label).to.match(/^\d+\.\d{2}$/);
+  });
+
+  it('formats labels from the step rather than the value magnitude', () => {
+    for (const [values, labels] of [
+      [[20, 24], ['20', '22', '24']],
+      [[0, 500], ['0', '250', '500']],
+      [[1.06, 1.09], ['1.06', '1.08', '1.10']],
+      [[0, 0.5], ['0', '0.25', '0.50']],
+      [[0, 5], ['0', '2.5', '5.0']],
+      [[-0.5, 0], ['-0.50', '-0.25', '0']],
+      [[2000, 3000], ['2.0k', '2.5k', '3.0k']],
+      [[20000, 40000], ['20k', '30k', '40k']],
+      [[-3000, -2000], ['-3.0k', '-2.5k', '-2.0k']],
+      [[1000, 1004], ['1000', '1002', '1004']],
+    ] as const) {
+      expect(graphScale(values, null, null).ticks.map(tick => tick.label)).to.deep.equal(labels);
+    }
+  });
+
+  it('never duplicates tick labels across 200 seeded ranges', () => {
+    let seed = 47;
+    const random = () => {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      return seed / 2 ** 32;
+    };
+    for (let i = 0; i < 200; i++) {
+      const magnitude = 10 ** (Math.floor(random() * 9) - 4);
+      const low = (random() - 0.5) * 1000 * magnitude;
+      const high = low + (0.01 + random() * 10) * magnitude;
+      const labels = graphScale([low, high], null, null).ticks.map(tick => tick.label);
+      expect(new Set(labels).size, `range ${low}–${high}: ${labels.join(', ')}`).to.equal(labels.length);
+    }
+  });
+
   it('snaps temperature observations to nice bounds independently of ideal bounds', () => {
     const scale = graphScale([20.1, 21, 22.4], 12, 32);
     // span / 2 = 1.15, so the specified ceiling nice step is 2.

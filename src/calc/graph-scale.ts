@@ -1,5 +1,3 @@
-import { formatCaptionNumber } from './measurements';
-
 export interface GraphTick {
   f: number;
   label: string;
@@ -21,6 +19,20 @@ export function niceStep(span: number, targetTicks: number): number {
     if (step >= raw) return step;
   }
   return magnitude * 10;
+}
+
+function stepDecimals(step: number): number {
+  const exponent = Math.floor(Math.log10(step) + 1e-9);
+  const leading = step / 10 ** exponent;
+  return Math.max(0, -exponent + (Math.abs(leading - 2.5) < 1e-9 ? 1 : 0));
+}
+
+function tickLabel(value: number, step: number): string {
+  if (value === 0) return '0';
+  if (Math.abs(value) >= 1000 && step >= 100) {
+    return `${(value / 1000).toFixed(stepDecimals(step / 1000))}k`;
+  }
+  return value.toFixed(stepDecimals(step));
 }
 
 export function graphScale(
@@ -51,7 +63,7 @@ export function graphScale(
   const ticks: GraphTick[] = [];
   for (let multiple = lowMultiple; multiple <= highMultiple; multiple++) {
     const value = multiple * step;
-    ticks.push({ f: map(value)!, label: formatCaptionNumber(value) });
+    ticks.push({ f: map(value)!, label: tickLabel(value, step) });
   }
   const validIdeal = min !== null && max !== null && Number.isFinite(min) && Number.isFinite(max) && min < max;
   return {
