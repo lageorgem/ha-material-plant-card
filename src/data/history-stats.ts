@@ -15,6 +15,21 @@ export interface HourRow {
 
 export interface Point { t: number; v: number; }
 
+export function seriesExtremes(
+  series: readonly { t: number; v: number | null }[],
+  keep?: (t: number) => boolean,
+): { minPoint: Point | null; maxPoint: Point | null } {
+  let minPoint: Point | null = null;
+  let maxPoint: Point | null = null;
+  for (const entry of series) {
+    if (entry.v === null || !Number.isFinite(entry.v) || (keep && !keep(entry.t))) continue;
+    const point = entry as Point;
+    if (minPoint === null || point.v < minPoint.v) minPoint = point;
+    if (maxPoint === null || point.v > maxPoint.v) maxPoint = point;
+  }
+  return { minPoint, maxPoint };
+}
+
 export interface MetricHistory {
   stats: Stats24h | null;
   series: { t: number; v: number | null }[];

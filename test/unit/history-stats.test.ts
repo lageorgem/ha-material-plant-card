@@ -1,6 +1,6 @@
 import { expect } from '@open-wc/testing';
 import {
-  fetchHistory, localDayStart, summarizeDailyMax, summarizeHourly, withCurrent,
+  fetchHistory, localDayStart, seriesExtremes, summarizeDailyMax, summarizeHourly, withCurrent,
   type HistoryFetch, type HourRow,
 } from '../../src/data/history-stats';
 
@@ -162,6 +162,45 @@ describe('localDayStart', () => {
       const expected = new Date(date.getFullYear(), date.getMonth(), date.getDate() - 2);
       expect(localDayStart(date.getTime(), 2)).to.equal(expected.getTime());
     }
+  });
+});
+
+describe('seriesExtremes', () => {
+  it('selects finite extrema and returns the exact series entries without mutation', () => {
+    const series = Object.freeze([
+      Object.freeze({ t: 30, v: 4 }), Object.freeze({ t: 10, v: -2 }),
+      Object.freeze({ t: 20, v: 9 }), Object.freeze({ t: 40, v: 0 }),
+    ]);
+    const result = seriesExtremes(series);
+    expect(result).to.deep.equal({ minPoint: { t: 10, v: -2 }, maxPoint: { t: 20, v: 9 } });
+    expect(result.minPoint).to.equal(series[1]);
+    expect(result.maxPoint).to.equal(series[2]);
+  });
+
+  it('ignores null, NaN and both infinities', () => {
+    const series = [null, NaN, Infinity, -Infinity, 0].map((v, t) => ({ t, v }));
+    expect(seriesExtremes(series)).to.deep.equal({ minPoint: series[4], maxPoint: series[4] });
+  });
+
+  it('excludes points rejected by the timestamp filter', () => {
+    const series = [{ t: 1, v: -100 }, { t: 2, v: 3 }, { t: 3, v: 100 }, { t: 4, v: 7 }];
+    expect(seriesExtremes(series, (t) => t % 2 === 0))
+      .to.deep.equal({ minPoint: series[1], maxPoint: series[3] });
+  });
+
+  it('keeps the first occurrence on ties, not the earliest timestamp', () => {
+    const series = [{ t: 40, v: -2 }, { t: 30, v: 9 }, { t: 20, v: -2 }, { t: 10, v: 9 }];
+    const result = seriesExtremes(series);
+    expect(result.minPoint).to.equal(series[0]);
+    expect(result.maxPoint).to.equal(series[1]);
+  });
+
+  it('returns null points for empty, entirely invalid or entirely filtered series', () => {
+    const empty = { minPoint: null, maxPoint: null };
+    expect(seriesExtremes([])).to.deep.equal(empty);
+    expect(seriesExtremes([null, NaN, Infinity, -Infinity].map((v, t) => ({ t, v }))))
+      .to.deep.equal(empty);
+    expect(seriesExtremes([{ t: 1, v: 2 }], () => false)).to.deep.equal(empty);
   });
 });
 
