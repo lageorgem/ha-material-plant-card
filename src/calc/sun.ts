@@ -84,6 +84,26 @@ export function sunTimes(at: number, lat: number, lon: number): SunDay {
   return { sunrise: eventTime(-1), sunset: eventTime(1) };
 }
 
+export interface SunEvent {
+  t: number;
+  kind: 'sunrise' | 'sunset';
+}
+
+/** Inclusive sunrise/sunset events across every overlapping solar day. */
+export function sunEvents(start: number, end: number, lat: number, lon: number): SunEvent[] {
+  const events: SunEvent[] = [];
+  for (let at = start - DAY_MS; at <= end + DAY_MS; at += DAY_MS) {
+    const day = sunTimes(at, lat, lon);
+    if (typeof day === 'string') continue;
+    for (const kind of ['sunrise', 'sunset'] as const) {
+      const t = day[kind];
+      if (start <= t && t <= end) events.push({ t, kind });
+    }
+  }
+  events.sort((a, b) => a.t - b.t);
+  return events.filter((event, index) => index === 0 || event.t - events[index - 1].t > MINUTE_MS);
+}
+
 /** Keep only intervals fully contained within the inset daylight window. */
 export function isDaylight(
   start: number,

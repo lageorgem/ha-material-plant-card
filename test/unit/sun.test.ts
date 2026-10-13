@@ -1,5 +1,5 @@
 import { expect } from '@open-wc/testing';
-import { isDaylight, sunTimes, type SunDay } from '../../src/calc/sun.js';
+import { isDaylight, sunEvents, sunTimes, type SunDay } from '../../src/calc/sun.js';
 
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
@@ -74,6 +74,44 @@ describe('sunTimes', () => {
   it('returns polar day in the Arctic summer and polar night in winter', () => {
     expect(sunTimes(at('2026-06-21T12:00:00Z'), 78, 15)).to.equal('polar-day');
     expect(sunTimes(at('2026-12-21T12:00:00Z'), 78, 15)).to.equal('polar-night');
+  });
+});
+
+describe('sunEvents', () => {
+  it('returns the sunset and next sunrise in a 24-hour window, sorted', () => {
+    const events = sunEvents(at('2026-10-13T12:00:00Z'), at('2026-10-14T12:00:00Z'), 44.43, 26.13);
+    expect(events.map(event => event.kind)).to.deep.equal(['sunset', 'sunrise']);
+    expect(Math.abs(events[0].t - at('2026-10-13T15:34:44Z'))).to.be.at.most(2 * MINUTE);
+    expect(Math.abs(events[1].t - at('2026-10-14T04:29:15Z'))).to.be.at.most(2 * MINUTE);
+    expect(events[0].t).to.be.lessThan(events[1].t);
+  });
+
+  it('returns six unique sorted events over three days, including extreme longitudes', () => {
+    const start = at('2026-10-13T12:00:00Z');
+    for (const lon of [26.13, -170, 170]) {
+      const events = sunEvents(start, start + 3 * DAY, 44.43, lon);
+      expect(events).to.have.length(6);
+      for (let i = 1; i < events.length; i++) {
+        expect(events[i].t - events[i - 1].t).to.be.greaterThan(MINUTE);
+      }
+      expect(events.every(event => event.t >= start && event.t <= start + 3 * DAY)).to.equal(true);
+    }
+  });
+
+  it('includes exact edges and single-event windows, excluding events just outside', () => {
+    const { sunrise, sunset } = normal(sunTimes(at('2026-10-14T10:00:00Z'), 44.43, 26.13));
+    expect(sunEvents(sunrise, sunset, 44.43, 26.13)).to.deep.equal([
+      { t: sunrise, kind: 'sunrise' }, { t: sunset, kind: 'sunset' },
+    ]);
+    expect(sunEvents(sunrise, sunrise, 44.43, 26.13)).to.deep.equal([{ t: sunrise, kind: 'sunrise' }]);
+    expect(sunEvents(sunset, sunset, 44.43, 26.13)).to.deep.equal([{ t: sunset, kind: 'sunset' }]);
+    expect(sunEvents(sunrise + 1, sunset - 1, 44.43, 26.13)).to.deep.equal([]);
+  });
+
+  it('returns no events during polar day or polar night', () => {
+    for (const date of ['2026-06-21T12:00:00Z', '2026-12-21T12:00:00Z']) {
+      expect(sunEvents(at(date), at(date) + 3 * DAY, 78, 15)).to.deep.equal([]);
+    }
   });
 });
 
