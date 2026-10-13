@@ -24,6 +24,8 @@ export class MplHistoryGraph extends LitElement {
 
   @state() private _width = 0;
   @state() private _hoverIndex: number | null = null;
+  @state() private _mouseBubble = false;
+  private _dismissed = false;
   private readonly _gradientId = `mpl-history-gradient-${++nextGradientId}`;
   private _observer?: ResizeObserver;
   private _frame?: number;
@@ -37,6 +39,7 @@ export class MplHistoryGraph extends LitElement {
     this.addEventListener('contextmenu', this._contextMenu);
     this.addEventListener('pointerdown', this._pointerDown);
     this.addEventListener('pointermove', this._pointerMove);
+    this.addEventListener('pointerenter', this._pointerEnter);
     this.addEventListener('pointerleave', this._pointerLeave);
     this.addEventListener('pointerup', this._pointerUp);
     this.addEventListener('pointercancel', this._release);
@@ -63,8 +66,8 @@ export class MplHistoryGraph extends LitElement {
     this._observer = undefined;
     if (this._frame !== undefined) cancelAnimationFrame(this._frame);
     this._frame = undefined;
-    this._clearHideTimer();
-    this._hoverIndex = null;
+    this._hide();
+    this._dismissed = false;
     if (this._pressedPointer !== undefined && this.hasPointerCapture(this._pressedPointer)) {
       this.releasePointerCapture(this._pressedPointer);
     }
@@ -73,6 +76,7 @@ export class MplHistoryGraph extends LitElement {
     this.removeEventListener('contextmenu', this._contextMenu);
     this.removeEventListener('pointerdown', this._pointerDown);
     this.removeEventListener('pointermove', this._pointerMove);
+    this.removeEventListener('pointerenter', this._pointerEnter);
     this.removeEventListener('pointerleave', this._pointerLeave);
     this.removeEventListener('pointerup', this._pointerUp);
     this.removeEventListener('pointercancel', this._release);
@@ -92,6 +96,8 @@ export class MplHistoryGraph extends LitElement {
   }
 
   private _pick(event: PointerEvent): void {
+    const mouse = event.pointerType === 'mouse' || !event.pointerType;
+    if (mouse && this._dismissed) return;
     const x = event.clientX - this.getBoundingClientRect().left;
     let distance = Infinity;
     let nearest: number | null = null;
@@ -101,8 +107,38 @@ export class MplHistoryGraph extends LitElement {
       if (candidate < distance) { distance = candidate; nearest = index; }
     });
     this._hoverIndex = nearest;
+    this._mouseBubble = mouse;
+    if (nearest !== null) document.addEventListener('keydown', this._keyDown);
+    else this._hide();
   }
 
+  private _hide(): void {
+    this._clearHideTimer();
+    this._hoverIndex = null;
+    document.removeEventListener('keydown', this._keyDown);
+  }
+  private _scheduleHide(delay: number): void {
+    this._clearHideTimer();
+    this._hideTimer = setTimeout(() => this._hide(), delay);
+  }
+  private _keyDown = (event: KeyboardEvent): void => {
+    if (event.key !== 'Escape') return;
+    this._dismissed = this._mouseBubble;
+    this._hide();
+  };
+  private _inBubble(event: PointerEvent): boolean {
+    return event.composedPath().some(target => target instanceof Element && target.classList.contains('bubble'));
+  }
+  private _pointerEnter = (event: PointerEvent): void => {
+    if ((event.pointerType === 'mouse' || !event.pointerType) && this._pressedPointer === undefined) {
+      this._clearHideTimer();
+      this._pick(event);
+    }
+  };
+  private _bubbleEnter = (): void => { this._clearHideTimer(); };
+  private _bubbleLeave = (): void => {
+    if (this._mouseBubble) this._scheduleHide(150);
+  };
   private _stop = (event: Event): void => { event.stopPropagation(); };
   private _contextMenu = (event: Event): void => {
     event.stopPropagation();
@@ -110,6 +146,7 @@ export class MplHistoryGraph extends LitElement {
   };
   private _pointerDown = (event: PointerEvent): void => {
     event.stopPropagation();
+    if (this._inBubble(event)) return;
     this._clearHideTimer();
     this._pick(event);
     if (event.pointerType === 'touch' || event.pointerType === 'pen') {
@@ -119,6 +156,7 @@ export class MplHistoryGraph extends LitElement {
     }
   };
   private _pointerMove = (event: PointerEvent): void => {
+    if (this._inBubble(event)) return;
     if (event.pointerType === 'mouse' || !event.pointerType) {
       if (this._pressedPointer !== undefined) return;
       this._clearHideTimer();
@@ -129,7 +167,8 @@ export class MplHistoryGraph extends LitElement {
   };
   private _pointerLeave = (event: PointerEvent): void => {
     if ((event.pointerType === 'mouse' || !event.pointerType) && this._pressedPointer === undefined) {
-      this._hoverIndex = null;
+      this._dismissed = false;
+      this._scheduleHide(150);
     }
   };
   private _pointerUp = (event: PointerEvent): void => {
@@ -140,11 +179,7 @@ export class MplHistoryGraph extends LitElement {
     if (this._pressedPointer === undefined || event.pointerId !== this._pressedPointer) return;
     if (this.hasPointerCapture(event.pointerId)) this.releasePointerCapture(event.pointerId);
     this._pressedPointer = undefined;
-    this._clearHideTimer();
-    this._hideTimer = setTimeout(() => {
-      this._hideTimer = undefined;
-      this._hoverIndex = null;
-    }, 2000);
+    this._scheduleHide(2000);
   };
 
   private _hoverPoint(): GraphPoint | undefined {
@@ -155,6 +190,7 @@ export class MplHistoryGraph extends LitElement {
   protected updated(): void {
     this.setAttribute('aria-label', this.summary);
     const point = this._hoverPoint();
+    if (!point) document.removeEventListener('keydown', this._keyDown);
     const bubble = this.shadowRoot?.querySelector<HTMLElement>('.bubble');
     if (!point || !bubble) return;
     const width = bubble.getBoundingClientRect().width;
@@ -202,7 +238,7 @@ export class MplHistoryGraph extends LitElement {
           </linearGradient>
         </defs>
         ${[0.8, 0.2].map(f => svg`<line class="threshold-guide" x1="0" x2=${this._width}
-          y1=${y(f)} y2=${y(f)} stroke="var(--mpl-outline-variant)" stroke-width="1" stroke-dasharray="3 3"></line>`)}
+          y1=${y(f)} y2=${y(f)} stroke="var(--mpl-outline)" opacity="1" stroke-width="1" stroke-dasharray="3 3"></line>`)}
         <path class="history-line" d=${path.trim()} fill="none" stroke=${gradient} stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"></path>
         ${isolated.map(point => svg`<circle class="isolated-point" cx=${this._x(point.t)} cy=${y(point.f!)}
@@ -219,7 +255,8 @@ export class MplHistoryGraph extends LitElement {
           <circle class="hover-dot" cx=${this._x(hover.t)} cy=${y(hover.f!)} r="3" fill=${colour(hover.f!)}></circle>
         ` : nothing}
       </svg>
-      ${hover ? html`<div class="bubble" aria-hidden="true">${hover.label}</div>` : nothing}
+      ${hover ? html`<div class=${this._mouseBubble ? 'bubble mouse-bubble' : 'bubble'} aria-hidden="true"
+        @pointerenter=${this._bubbleEnter} @pointerleave=${this._bubbleLeave}>${hover.label}</div>` : nothing}
     `;
   }
 
@@ -233,6 +270,7 @@ export class MplHistoryGraph extends LitElement {
       cursor: crosshair;
     }
     svg { display: block; overflow: visible; }
+    .bubble.mouse-bubble { pointer-events: auto; }
     .bubble {
       position: absolute;
       bottom: calc(100% + 4px);

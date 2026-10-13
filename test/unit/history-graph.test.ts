@@ -20,7 +20,8 @@ async function settle(el: MplHistoryGraph): Promise<void> {
 async function mount(data = points): Promise<MplHistoryGraph> {
   const wrapper = await fixture<HTMLDivElement>(html`
     <div style="width:240px; --mpl-success:rgb(10,20,30); --mpl-error:rgb(40,50,60);
-      --mpl-on-surface-variant:rgb(70,80,90); --mpl-outline-variant:rgb(100,110,120);
+      --mpl-on-surface-variant:rgb(70,80,90); --mpl-outline:rgb(155,143,128);
+      --mpl-outline-variant:rgb(100,110,120);
       --mpl-surface-container-high:rgb(130,140,150); --mpl-inverse-surface:rgb(160,170,180);
       --mpl-inverse-on-surface:rgb(190,200,210)">
       <mpl-history-graph .points=${data} .start=${0} .end=${100}
@@ -67,7 +68,9 @@ describe('mpl-history-graph', () => {
       expect(guides[index].y1.baseVal.value).to.be.closeTo(y, 0.001);
       expect(guides[index].y2.baseVal.value).to.be.closeTo(y, 0.001);
       expect(guides[index].x2.baseVal.value).to.equal(240);
-      expect(getComputedStyle(guides[index]).stroke).to.equal('rgb(100, 110, 120)');
+      expect(guides[index].getAttribute('stroke')).to.equal('var(--mpl-outline)');
+      expect(getComputedStyle(guides[index]).stroke).to.equal('rgb(155, 143, 128)');
+      expect(getComputedStyle(guides[index]).opacity).to.equal('1');
       expect(guides[index].getAttribute('stroke-dasharray')).to.equal('3 3');
     }
   });
@@ -176,7 +179,7 @@ describe('mpl-history-graph', () => {
     expect(style.color).to.equal('rgb(190, 200, 210)');
     expect(style.fontSize).to.equal('11px');
     expect(style.lineHeight).to.equal('16px');
-    expect(style.pointerEvents).to.equal('none');
+    expect(style.pointerEvents).to.equal('auto');
     for (const x of [0, 240]) {
       pointer(el, 'pointermove', x);
       await el.updateComplete;
@@ -187,8 +190,95 @@ describe('mpl-history-graph', () => {
     await el.updateComplete;
     bubbleInside(el);
     pointer(el, 'pointerleave', 0);
+    await new Promise(resolve => setTimeout(resolve, 160));
     await el.updateComplete;
     expect(el.shadowRoot!.querySelector('.bubble')).to.equal(null);
+  });
+
+  it('keeps the bubble during graph-to-bubble transfer and hides after leaving both', async () => {
+    const el = await mount();
+    const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      pointer(el, 'pointermove', 60);
+      await el.updateComplete;
+      const bubble = node<HTMLElement>(el, '.bubble');
+      pointer(el, 'pointerleave', 60);
+      clock.tick(149);
+      bubble.dispatchEvent(new PointerEvent('pointerenter', { pointerType: 'mouse' }));
+      clock.tick(500);
+      await el.updateComplete;
+      expect(node(el, '.bubble')).to.equal(bubble);
+      const listener = sinon.spy();
+      el.parentElement!.addEventListener('click', listener);
+      bubble.click();
+      expect(listener.called).to.equal(false);
+      bubble.dispatchEvent(new PointerEvent('pointermove', {
+        pointerType: 'mouse', clientX: el.getBoundingClientRect().left + 180,
+        bubbles: true, composed: true,
+      }));
+      await el.updateComplete;
+      expect(bubble.textContent).to.equal('Middle');
+      bubble.dispatchEvent(new PointerEvent('pointerleave', { pointerType: 'mouse' }));
+      clock.tick(149);
+      await el.updateComplete;
+      expect(node(el, '.bubble')).to.equal(bubble);
+      clock.tick(1);
+      await el.updateComplete;
+      expect(el.shadowRoot!.querySelector('.bubble')).to.equal(null);
+    } finally { clock.restore(); }
+  });
+
+  it('cancels delayed hiding on graph re-entry', async () => {
+    const el = await mount();
+    const clock = sinon.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      pointer(el, 'pointermove', 60);
+      pointer(el, 'pointerleave', 60);
+      clock.tick(149);
+      pointer(el, 'pointerenter', 60);
+      clock.tick(500);
+      await el.updateComplete;
+      expect(node(el, '.bubble').textContent).to.equal('Middle');
+    } finally { clock.restore(); }
+  });
+
+  it('dismisses with Escape until graph leave and re-entry', async () => {
+    const el = await mount();
+    pointer(el, 'pointerenter', 60);
+    await el.updateComplete;
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    expect(node(el, '.bubble')).not.to.equal(null);
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.bubble')).to.equal(null);
+    pointer(el, 'pointermove', 180);
+    pointer(el, 'pointerdown', 180);
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.bubble')).to.equal(null);
+    pointer(el, 'pointerleave', 180);
+    pointer(el, 'pointerenter', 180);
+    await el.updateComplete;
+    expect(node(el, '.bubble').textContent).to.equal('Low');
+  });
+
+  it('removes its document keydown listener on hide and disconnect', async () => {
+    const el = await mount();
+    const add = sinon.spy(document, 'addEventListener');
+    const remove = sinon.spy(document, 'removeEventListener');
+    try {
+      pointer(el, 'pointermove', 60);
+      await el.updateComplete;
+      const handler = add.getCalls().find(call => call.args[0] === 'keydown')!.args[1];
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+      await el.updateComplete;
+      expect(remove.calledWith('keydown', handler)).to.equal(true);
+      pointer(el, 'pointerleave', 60);
+      pointer(el, 'pointerenter', 60);
+      await el.updateComplete;
+      remove.resetHistory();
+      el.remove();
+      expect(remove.calledWith('keydown', handler)).to.equal(true);
+    } finally { add.restore(); remove.restore(); }
   });
 
   for (const pointerType of ['touch', 'pen']) {
@@ -200,6 +290,7 @@ describe('mpl-history-graph', () => {
           pointer(el, 'pointerdown', 60, pointerType);
           await el.updateComplete;
           expect(node(el, '.bubble').textContent).to.equal('Middle');
+          expect(getComputedStyle(node(el, '.bubble')).pointerEvents).to.equal('none');
           clock.tick(3000);
           pointer(el, 'pointermove', 180, pointerType);
           pointer(el, 'pointerleave', 180, pointerType);
