@@ -20,16 +20,37 @@ hide_image: false
 # values, or the entire value text below compact-mode gauges.
 hide_units: false
 # Full only: history refreshes every 10 minutes.
-# Optional string: 24h (default) or 7d; editor: Metrics → History window.
+# Optional string: 24h (default), 3d, 7d, 14d or 30d.
+# Editor: Metrics → History window; per-metric period overrides this.
 history_period: 7d
-# Ignore 0 lx (night); raw history, time-weighted daylight average (default).
-illuminance_daytime_only: true
-# Illuminance label: Daytime · 7 d; false restores the previous behaviour.
-# Other measurements need recorder statistics/state_class: measurement;
-# their label is Last 7 d here.
-# Cumulative sensors (total/total_increasing), including DLI, always show
-# Daily · 7 d: daily totals for the last 7 complete days, excluding today.
+# Optional string: summary (default) or graph; per-metric display overrides it.
+full_display: summary
+# All history uses recorder hourly statistics, not raw history.
+# Measurements need state_class: measurement; DLI uses hourly recorded states.
 hide_history: false
+# Optional map; all nested keys are optional. Editor: Per-metric settings.
+metrics:
+  dli:
+    # Optional number: 1–30, default 7; today included, partial so far.
+    # 1 = Today; this example shows Daily max · 14 d, one point per day.
+    days: 14
+    # Graph: green in ideal band, red outside; min/max triangles, no average.
+    # Hover or touch/drag inspects points without opening more-info.
+    display: graph
+  illuminance:
+    # Optional boolean, default true: use HA location's sunrise/sunset.
+    daylight_only: true
+    # Optional number: 0–180 minutes, default 30. Count only whole hourly
+    # buckets inside sunrise + 45 minutes to sunset − 45 minutes here.
+    # Label: Daylight · 7 d; graph mode would show night hours as gaps.
+    daylight_offset: 45
+  moisture:
+    # Optional string: plant, out_of_range, low, high or never.
+    # Explicit trigger overrides problem_source/problem_sensors.
+    problem_trigger: low
+  temperature:
+    # Optional string: override the built-in icon in either mode.
+    icon: mdi:thermometer-lines
 image: /local/plants/orchid.jpg
 battery_sensor: sensor.sh_5_battery
 # Bare battery glyph turns red below this percentage; otherwise neutral.
@@ -37,7 +58,7 @@ battery_warn_level: 10
 # Full-mode non-cumulative values, rings and title icons turn red outside
 # ideal bounds. Only selected problems add the red left accent and tint.
 # DLI's current running total keeps the problem-setting colour.
-# Daytime-only 0 lx also keeps the problem-setting colour, not automatic red.
+# Illuminance outside the daylight window also keeps the problem-setting colour.
 problem_source: plant
 # Empty/omitted allows all measurements; this example selects two.
 problem_sensors:

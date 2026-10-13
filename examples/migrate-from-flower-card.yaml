@@ -26,14 +26,31 @@ after:
   type: custom:material-plant-card
   entity: plant.orhideea
   name: Orchid
-  # Default, as in flower-card: grouped metric tiles with 24h range bars.
+  # Default, as in flower-card: grouped metric tiles with summary range bars.
   display_type: full
+  # Optional string: summary (default) or graph.
+  full_display: summary
+  # Optional string: 24h (default), 3d, 7d, 14d or 30d.
+  history_period: 24h
   show_bars: [moisture, conductivity, temperature, illuminance, humidity, dli]
   hide_species: false
   hide_image: false
   hide_units: false
-  # Disable with true; requires recorder measurement statistics (not running-total DLI).
+  # Disable with true; all history uses recorder hourly statistics.
+  # DLI uses daily maxima from hourly states, including today's partial total.
   hide_history: false
+  # Optional per-metric map; these settings are additions, not migration requirements.
+  metrics:
+    dli:
+      # Optional number: 1–30 (default 7); 1 shows Today.
+      days: 7
+      # Optional string: summary or graph, inherits full_display.
+      display: graph
+    illuminance:
+      # Optional boolean, default true; based on HA location sunrise/sunset.
+      daylight_only: true
+      # Optional number: minutes after sunrise/before sunset, 0–180, default 30.
+      daylight_offset: 30
   battery_sensor: sensor.sh_5_battery
   # Default: red below 10%; otherwise neutral, with the number inside the glyph.
   battery_warn_level: 10

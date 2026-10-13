@@ -4,13 +4,13 @@ Material 3 Expressive plant monitoring for Home Assistant, using [Olen's plant m
 
 <img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/hero-dark.png" alt="Eleven plants on a dark dashboard using Material Plant Card in compact mode" width="900">
 
-- Full mode (default, as in flower-card): a header and grouped Material 3 Expressive metric tiles. Each title row has a small tone-coloured icon and metric name, with **Last 24 h**, **Last 7 d**, **Daytime · 24 h**, **Daytime · 7 d** or **Daily · 7 d** on the right. A large current value with its unit sits above **Ideal a–b** on the left. On the right, a scale has ticks at the ideal bounds and a historical min–max segment coloured success inside the ideal range and error outside it. A hollow ring marks the current value. For non-cumulative sensors, out-of-range current values, rings and title icons turn error red even when problem settings do not flag a problem, except for 0 lx with daytime-only illuminance enabled. Cumulative current values such as DLI keep the problem-setting colour. A triangle below the scale marks the average, success-coloured in range and error-coloured outside it. Below that, **Min · Avg · Max** values each get an error badge when outside the ideal range, independently of problem settings. Only real problems add a faint red gradient tint.
+- Full mode (default, as in flower-card): grouped Material 3 Expressive metric tiles with an icon, name and history label above a large current value and **Ideal a–b**. Summary display shows ideal-bound ticks, a threshold-coloured min–max segment, a current-value ring, an average triangle and **Min · Avg · Max** badges. Graph display shows a threshold-coloured history line, dashed ideal-bound guides, min/max triangles and a latest-value ring, with no average marker or statistics row.
 - Compact mode: circular gauges with icons centred on the dial, low, just-right and high zones, an active arc and a position dot; coloured fill follows the track's thin outer zones, thick just-right band and gaps. Logarithmic illuminance scaling for positive lux thresholds applies in both modes.
 - Success colour in range (`--md-sys-color-success`, falling back to `--success-color`). Compact gauges use neutral on-surface-variant for out-of-range readings without a problem, and error colour for problems with bold, error-coloured value text.
 - Cookie-shaped plant photo, missing-image placeholder, species or problem summary, and a red error circle with a centred **!** when attention is needed.
 - Optional bare iOS-style battery glyph with the level number inside; red below `battery_warn_level` (default **10%**), otherwise neutral. `battery_ok_level` is accepted but ignored for flower-card compatibility and is not in the visual editor.
-- Integration-driven problems by default, or opt-in problems from out-of-range gauges.
-- Both modes share the photo size and species header, with a visual editor for Metrics, Problems and Appearance.
+- Integration-driven problems by default, or opt-in range-based problems. Per-metric triggers can follow the plant monitor, flag either bound, flag only low/high, or never flag.
+- Both modes share the photo size and species header, with a visual editor for **Metrics**, **Per-metric settings**, **Problems** and **Appearance**. Per-metric settings has one expandable section per measurement.
 - Compact has width-aware balanced gauge rows: when two rows are needed, five split 3/2, six 3/3 and seven 4/3, with the last row centred. Its six-gauge footprint is approximately **327 × 160 px** at 327 px width, versus flower-card's **327 × 203 px**. Full-mode tiles are approximately **84 px** tall; a six-metric full card is approximately **327 × 614 px**.
 - Flower-card-compatible configuration: change only the card type. `bars_per_row`, `show_care` and `extra_badges` are accepted but ignored.
 
@@ -23,13 +23,39 @@ entity: plant.orhideea
 
 Replace the entity ID with your own. Sensor readings and ranges come from the integration. Tap tiles or gauges for sensor more-info, or the photo/name for plant more-info. Set `display_type: compact` for gauges instead of the default full-mode tiles. `hide_units` defaults to `false` in both modes; `true` hides only the unit next to full-mode values, but hides complete compact gauge value text.
 
-Full-mode history generally uses Home Assistant recorder long-term statistics for sensors with `state_class: measurement` (provided by plant monitor measurement sensors). `history_period` is an optional string: `24h` (default) or `7d` (example: `history_period: 7d`). It selects the window for the range, average and Min/Avg/Max; choose **Metrics → History window** in the editor. The tile label is **Last 24 h** or **Last 7 d**. The historical range includes the current reading if it extends beyond the recorded range, except for 0 lx in daytime-only illuminance mode.
+### Choose history and display per metric
 
-`illuminance_daytime_only` is an optional boolean, default `true` (example: `illuminance_daytime_only: true`). In full mode, illuminance ignores 0 lx (night) readings in its range, average and **Min · Avg · Max**. It uses Home Assistant's raw history because recorder hourly statistics cannot exclude darkness; the average is time-weighted over daylight (readings above 0 lx, not a sunrise/sunset schedule). Keep the sensor in recorder history for the selected window. Labels are **Daytime · 24 h** or **Daytime · 7 d**, following `history_period`. A current 0 lx reading does not extend the range and keeps the problem-setting colour rather than automatically turning error red; with default plant-driven problems, red requires a selected plant monitor problem. Set `illuminance_daytime_only: false` to restore the previous behaviour, or disable **Metrics → Ignore darkness in illuminance history**. Compact mode is unchanged.
+All history uses recorder **hourly statistics**, with no raw history requests. Measurement sensors need `state_class: measurement` and recorder statistics enabled. `history_period` is an optional string: `24h` (default), `3d`, `7d`, `14d` or `30d` (example: `history_period: 7d`). `full_display` is an optional string, `summary` (default) or `graph` (example: `full_display: graph`).
 
-Cumulative sensors (`state_class: total` or `total_increasing`), including the plant monitor's DLI, always show daily totals for the **last 7 complete days**, labelled **Daily · 7 d**, regardless of `history_period`. Today's partial total is excluded from the historical range, average and Min/Avg/Max; the large DLI value remains today's running total. This replaces the previous DLI **—** history display.
+`metrics` is an optional map keyed by measurement names, not entity IDs. Each metric accepts optional `icon` (string, built-in icon by default, example `mdi:thermometer-lines`), `problem_trigger` (string: `plant`, `out_of_range`, `low`, `high`, `never`; defaults from `problem_source`/`problem_sensors`; example `low`), `period` (same string choices as `history_period`, inherits it; example `14d`), and `display` (string: `summary` or `graph`, inherits `full_display`; example `graph`). Explicit problem triggers override global filtering and are independent of the plant monitor unless set to `plant`. Full-mode cumulative sensors use `days` instead of `period`: optional number, rounded and clamped to 1–30, default 7 (example `14`).
 
-History refreshes every **10 minutes**; `hide_history: true` disables fetching and removes the history label, the scale's historical segment and average marker, and the Min/Avg/Max row, keeping current values, ideal ranges, ticks and current-value rings. Missing statistics show **—** without a historical segment or average marker and leave the current value and ideal range visible. Historical segment and average colours follow the ideal bounds independently of problem settings.
+```yaml
+type: custom:material-plant-card
+entity: plant.orhideea
+full_display: summary
+metrics:
+  dli:
+    days: 14
+    display: graph
+  illuminance:
+    daylight_offset: 45
+  moisture:
+    problem_trigger: low
+  temperature:
+    icon: mdi:thermometer-lines
+```
+
+Hover or touch/drag on a graph to see a point's time and value. The line is green inside the ideal band and error red outside it; min/max triangles also turn red outside ideal bounds. Touching the graph does not open more-info; the rest of the tile does. Today-only DLI omits min/max triangles.
+
+### Read daylight and DLI history
+
+Illuminance has optional `metrics.illuminance.daylight_only` (boolean, default `true`, example `false`) and `daylight_offset` (number in minutes, rounded and clamped to 0–180, default 30, example 45). Home Assistant's latitude/longitude determine sunrise and sunset. Only hourly buckets fully inside **sunrise + offset** to **sunset − offset** count; night hours become graph gaps. Labels read **Daylight · 24 h** or the selected period. A current reading outside that window is not counted or automatically forced red; it follows problem settings instead. Disabling the filter includes all hours. Missing location coordinates fall back to unfiltered history and **Last …** labels. The filter does not affect compact mode.
+
+DLI and other cumulative sensors (`state_class: total` or `total_increasing`) use the maximum hourly recorded state per local day; for DLI, that is the day's total. **Today is included**, partial so far. `days: 1` shows **Today** and today's hourly graph; larger windows show **Daily max · N d** and one point per day. Summary statistics describe those daily maxima; the large value remains today's running total. Long-term statistics support 30 days when the data exists.
+
+Historical colours follow ideal bounds independently of problem settings. Non-cumulative current values, rings and title icons turn red outside ideal bounds, except for daylight-filtered illuminance outside its window. DLI current values keep the problem-setting colour. Only selected problems add a faint red tint.
+
+History refreshes every **10 minutes**. `hide_history` is an optional boolean, default `false` (example `hide_history: true`); enabling it disables fetching and hides history labels and summary statistics. Summary retains ideal ticks and the current ring; graph retains empty ideal-bound guides. Missing statistics show **—** in summary badges without a historical segment or average marker; current values and ideal ranges remain.
 
 Compact-mode gauge tooltips use the Material plain style with two lines: `<Metric>[ · too low/high]` and `<value> <unit> · ideal <min>–<max> <unit>`. Show them with a touch long-press (about 0.45 s), mouse hover (0.5 s) or keyboard focus; Escape dismisses. A normal tap still opens sensor more-info; a long-press does not. With the default `problem_source: plant`, low illuminance at night can stay neutral when the integration does not flag a problem.
 
