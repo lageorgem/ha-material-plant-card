@@ -64,7 +64,7 @@ describe('mpl-history-graph', () => {
     expect(el.getAttribute('aria-label')).to.equal('Updated summary');
     const guides = el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide');
     expect(guides.length).to.equal(2);
-     for (const [index, y] of [30, 48].entries()) {
+     for (const [index, y] of [17.6, 46.4].entries()) {
       expect(guides[index].y1.baseVal.value).to.be.closeTo(y, 0.001);
       expect(guides[index].y2.baseVal.value).to.be.closeTo(y, 0.001);
       expect(guides[index].x2.baseVal.value).to.equal(240);
@@ -92,7 +92,7 @@ describe('mpl-history-graph', () => {
      expect(gradient.getAttribute('y2')).to.equal('64');
     const stops = [...gradient.querySelectorAll('stop')];
     expect(stops.map(stop => Number(stop.getAttribute('offset'))))
-       .to.deep.equal([0, 30 / 64, 30 / 64, 48 / 64, 48 / 64, 1]);
+        .to.deep.equal([0, (56 - 0.8 * 48) / 64, (56 - 0.8 * 48) / 64, 46.4 / 64, 46.4 / 64, 1]);
     expect(stops.map(stop => getComputedStyle(stop).stopColor)).to.deep.equal([
       'rgb(40, 50, 60)', 'rgb(40, 50, 60)', 'rgb(10, 20, 30)',
       'rgb(10, 20, 30)', 'rgb(40, 50, 60)', 'rgb(40, 50, 60)',
@@ -124,26 +124,26 @@ describe('mpl-history-graph', () => {
     const min = node<SVGPolygonElement>(el, '.min-marker');
     const max = node<SVGPolygonElement>(el, '.max-marker');
     expect(min.points.getItem(0).x).to.equal(60);
-     expect(min.points.getItem(0).y).to.equal(52.5);
+      expect(min.points.getItem(0).y).to.be.closeTo(49.9, 0.001);
     expect(max.points.getItem(0).x).to.equal(180);
-     expect(max.points.getItem(0).y).to.equal(25.5);
-     expect(min.points.getItem(1).y - min.points.getItem(0).y).to.equal(5);
-     expect(max.points.getItem(0).y - max.points.getItem(1).y).to.equal(5);
-     expect(min.points.getItem(2).x - min.points.getItem(1).x).to.equal(7);
-     expect(max.points.getItem(2).x - max.points.getItem(1).x).to.equal(7);
+      expect(max.points.getItem(0).y).to.be.closeTo(14.1, 0.001);
+      expect(min.points.getItem(1).y - min.points.getItem(0).y).to.equal(4);
+      expect(max.points.getItem(0).y - max.points.getItem(1).y).to.equal(4);
+      expect(min.points.getItem(2).x - min.points.getItem(1).x).to.equal(6);
+      expect(max.points.getItem(2).x - max.points.getItem(1).x).to.equal(6);
     for (const [kind, x, base, cy, fill] of [
-       ['min', 60, 57.5, 48, 'rgb(10, 20, 30)'],
-       ['max', 180, 20.5, 30, 'rgb(40, 50, 60)'],
+        ['min', 60, 53.9, 46.4, 'rgb(10, 20, 30)'],
+        ['max', 180, 10.1, 17.6, 'rgb(40, 50, 60)'],
     ] as const) {
       const triangle = node<SVGPolygonElement>(el, `.${kind}-marker`);
-      expect(triangle.points.getItem(1).y).to.equal(base);
-      expect(triangle.points.getItem(2).y).to.equal(base);
-       expect(triangle.points.getItem(1).x).to.equal(x - 3.5);
-       expect(triangle.points.getItem(2).x).to.equal(x + 3.5);
+      expect(triangle.points.getItem(1).y).to.be.closeTo(base, 0.001);
+      expect(triangle.points.getItem(2).y).to.be.closeTo(base, 0.001);
+        expect(triangle.points.getItem(1).x).to.equal(x - 3);
+        expect(triangle.points.getItem(2).x).to.equal(x + 3);
       const dot = node<SVGCircleElement>(el, `.${kind}-dot`);
       expect(dot.cx.baseVal.value).to.equal(x);
-      expect(dot.cy.baseVal.value).to.equal(cy);
-      expect(dot.r.baseVal.value).to.equal(2.5);
+      expect(dot.cy.baseVal.value).to.be.closeTo(cy, 0.001);
+      expect(dot.r.baseVal.value).to.equal(2);
       expect(getComputedStyle(dot).fill).to.equal(fill);
     }
     expect(getComputedStyle(min).fill).to.equal('rgb(10, 20, 30)');
@@ -160,6 +160,29 @@ describe('mpl-history-graph', () => {
     expect(el.shadowRoot!.querySelector('.min-marker, .max-marker, .min-dot, .max-dot, .avg-marker')).to.equal(null);
   });
 
+   it('uses the full plot height without in-domain events and restores it when events leave', async () => {
+     const el = await mount([
+       { t: 0, f: 1, label: 'Maximum' }, { t: 100, f: 0, label: 'Minimum' },
+     ]);
+     el.thresholdHigh = 1;
+     el.thresholdLow = 0;
+     for (const events of [[], [{ t: -1, icon: 'mdi:outside-before' }, { t: 101, icon: 'mdi:outside-after' }]]) {
+       el.events = events;
+       await el.updateComplete;
+       expect(node(el, '.history-line').getAttribute('d')).to.equal('M0,8 L240,56');
+       const guides = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')];
+       expect(guides.map(guide => guide.y1.baseVal.value)).to.deep.equal([8, 56]);
+       expect(guides.map(guide => guide.y2.baseVal.value)).to.deep.equal([8, 56]);
+       expect(el.shadowRoot!.querySelector('.event-icon, .event-line')).to.equal(null);
+     }
+     el.events = [{ t: 0, icon: 'mdi:weather-sunset-up' }];
+     await el.updateComplete;
+     expect(node(el, '.history-line').getAttribute('d')).to.equal('M0,22 L240,56');
+     el.events = [];
+     await el.updateComplete;
+     expect(node(el, '.history-line').getAttribute('d')).to.equal('M0,8 L240,56');
+   });
+
    it('reserves the icon band above all plotted geometry at both fraction extremes', async () => {
      const el = await mount([
        { t: 0, f: 1, label: 'Maximum' }, { t: 100, f: 0, label: 'Minimum' },
@@ -174,7 +197,10 @@ describe('mpl-history-graph', () => {
        pointer(el, 'pointermove', f === 1 ? 0 : 240);
        await el.updateComplete;
        const host = el.getBoundingClientRect();
-       expect(host.height).to.equal(64);
+        expect(host.height).to.equal(64);
+        expect(node(el, '.history-line').getAttribute('d')).to.equal('M0,22 L240,56');
+        expect([...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')]
+          .map(guide => guide.y1.baseVal.value)).to.deep.equal([22, 56]);
        for (const shape of el.shadowRoot!.querySelectorAll<SVGGraphicsElement>(
          '.history-line, .threshold-guide, .event-line, .min-marker, .max-marker, .min-dot, .max-dot, .current-ring, .hover-guide, .hover-dot',
        )) {
@@ -189,7 +215,7 @@ describe('mpl-history-graph', () => {
      }
    });
 
-   for (const [kind, fractions] of [['max', [0.1, 0.5, 1]], ['min', [0, 0.5, 0.9]]] as const) {
+   for (const [kind, fractions] of [['max', [0, 0.5, 1]], ['min', [0, 0.5, 1]]] as const) {
      it(`keeps ${kind} triangle tip gaps fixed and triangles inside the host`, async () => {
        const el = await mount();
        const gaps: number[] = [];
@@ -202,16 +228,16 @@ describe('mpl-history-graph', () => {
            gaps.push(Math.abs(triangle.points.getItem(0).y - dot.cy.baseVal.value));
            const host = el.getBoundingClientRect();
            const rect = triangle.getBoundingClientRect();
-           expect(rect.top).to.be.at.least(host.top + 14);
+           expect(rect.top).to.be.at.least(host.top);
            expect(rect.bottom).to.be.at.most(host.bottom);
            expect(rect.left).to.be.at.least(host.left);
            expect(rect.right).to.be.at.most(host.right);
-           expect(rect.width).to.equal(7);
-           expect(rect.height).to.equal(5);
+           expect(rect.width).to.equal(6);
+           expect(rect.height).to.equal(4);
          }
        }
-       for (const gap of gaps) expect(gap).to.be.closeTo(4.5, 0.5);
-       expect(Math.max(...gaps) - Math.min(...gaps)).to.be.at.most(0.5);
+       for (const gap of gaps) expect(gap).to.be.closeTo(3.5, 0.001);
+       expect(Math.max(...gaps) - Math.min(...gaps)).to.be.at.most(0.001);
      });
    }
 
@@ -225,7 +251,7 @@ describe('mpl-history-graph', () => {
       el.thresholdLow = low;
       el.thresholdHigh = high;
       await el.updateComplete;
-       const ys = [high, low].filter(f => f !== null).map(f => 54 - f * 30);
+       const ys = [high, low].filter(f => f !== null).map(f => 56 - f * 48);
       const guides = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')];
       expect(guides.length).to.equal(ys.length);
       for (const [index, guide] of guides.entries()) {
@@ -236,8 +262,8 @@ describe('mpl-history-graph', () => {
       const success = 'rgb(10, 20, 30)';
       const error = 'rgb(40, 50, 60)';
       const expected: [number, string][] = [[0, high === null ? success : error]];
-       if (high !== null) expected.push([(54 - high * 30) / 64, error], [(54 - high * 30) / 64, success]);
-       if (low !== null) expected.push([(54 - low * 30) / 64, success], [(54 - low * 30) / 64, error]);
+       if (high !== null) expected.push([(56 - high * 48) / 64, error], [(56 - high * 48) / 64, success]);
+       if (low !== null) expected.push([(56 - low * 48) / 64, success], [(56 - low * 48) / 64, error]);
       expected.push([1, low === null ? success : error]);
       const stops = [...node(el, 'linearGradient').querySelectorAll('stop')];
       expect(stops.map(stop => [Number(stop.getAttribute('offset')), getComputedStyle(stop).stopColor]))
@@ -318,8 +344,8 @@ describe('mpl-history-graph', () => {
       await el.updateComplete;
       const ring = node<SVGCircleElement>(el, '.current-ring');
       expect(ring.cx.baseVal.value).to.equal(240);
-       expect(ring.cy.baseVal.value).to.equal(36);
-      expect(ring.r.baseVal.value).to.equal(4);
+       expect(ring.cy.baseVal.value).to.be.closeTo(27.2, 0.001);
+      expect(ring.r.baseVal.value).to.equal(3.5);
       expect(ring.getAttribute('stroke-width')).to.equal('2');
       expect(getComputedStyle(ring).stroke).to.equal(colour);
       expect(getComputedStyle(ring).fill).to.equal('rgb(130, 140, 150)');
