@@ -320,12 +320,18 @@ describe('mpl-metric-row graph display', () => {
     expect(style.gridColumnStart).to.equal('2');
     expect(style.gridRowStart).to.equal('2');
     expect(style.gridRowEnd).to.equal('4');
-    expect(graph(el).getBoundingClientRect().height).to.equal(48);
-    expect(el.getBoundingClientRect().height).to.equal(68);
+    expect(getComputedStyle(el).gridTemplateRows).to.equal('20px 28px 36px');
+    expect(graph(el).getBoundingClientRect().height).to.equal(64);
+    expect(el.getBoundingClientRect().height).to.equal(84);
+    expect(getComputedStyle(element(el, '.value')).gridRowStart).to.equal('2');
+    expect(getComputedStyle(element(el, '.ideal')).gridRowStart).to.equal('3');
+    expect(getComputedStyle(element(el, '.ideal')).alignSelf).to.equal('start');
     el.display = 'summary';
     await el.updateComplete;
     expect(el.shadowRoot!.querySelector('mpl-history-graph')).to.equal(null);
     expect(badges(el)).to.have.length(3);
+    expect(getComputedStyle(el).gridTemplateRows).to.equal('20px 28px 20px');
+    expect(el.getBoundingClientRect().height).to.equal(68);
   });
 
   for (const missingHourly of [false, true]) {
@@ -498,7 +504,7 @@ describe('mpl-metric-row graph display', () => {
       expect(props.maxMarker).to.equal(null);
       expect(props.current).to.equal(null);
       expect(props.summary).to.equal(describeMeasurement(moisture));
-      expect(el.getBoundingClientRect().height).to.equal(68);
+      expect(el.getBoundingClientRect().height).to.equal(84);
     }
     const el = await graphRow({ ...moisture, min: null });
     expect(graph(el).points.every(p => p.f === null)).to.equal(true);

@@ -85,6 +85,72 @@ describe('material-plant-card', () => {
       return hass;
     };
 
+    for (const period of ['today', '24h', '3d'] as const) {
+      it(`plots ${period === '3d' ? 'hourly' : 'five-minute'} means and uses series points for ${period} graph markers`, async () => {
+        clockForStats();
+        const hass = fakeHass();
+        hass.config.time_zone = 'UTC';
+        const fine = [10, 40, 20].map((mean, index) => ({
+          start: Date.now() - (3 - index) * 300000, end: Date.now() - (2 - index) * 300000,
+          min: mean - 5, max: mean + 5, mean,
+        }));
+        const hourly = [{ start: Date.now() - 3600000, end: Date.now(), min: 1, max: 99, mean: 30 }];
+        hass.callWS.callsFake(async (msg: Record<string, unknown>) => {
+          if (msg.type === 'plant/get_info') return { result: info };
+          return { 'sensor.moisture': msg.period === '5minute' ? fine : hourly };
+        });
+        const card = await mount(full({ show_bars: ['moisture'], full_display: 'graph', history_period: period }), hass);
+        const history = rows(card)[0].history!;
+        const source = period === '3d' ? hourly : fine;
+        expect(history.series).to.deep.equal([
+          ...source.map(row => ({ t: (row.start + row.end) / 2, v: row.mean })), { t: Date.now(), v: 25 },
+        ]);
+        expect(history.series).to.have.length(source.length + 1);
+        for (const point of [history.minPoint, history.maxPoint]) {
+          expect(history.series.some(p => p.t === point?.t && p.v === point?.v)).to.equal(true);
+        }
+        expect(history.stats).to.deep.equal({ min: 1, max: 99, mean: 30 });
+        expect(calls(hass).filter(call => call.args[0].period === '5minute').map(call => call.args[0].statistic_ids))
+          .to.deep.equal(period === '3d' ? [] : [['sensor.moisture']]);
+        if (period !== '3d') expect(calls(hass).find(call => call.args[0].period === '5minute')!.args[0].start_time)
+          .to.equal(new Date(period === 'today' ? localDayStart(Date.now(), 0, 'UTC') : Date.now() - 86400000).toISOString());
+        card.remove();
+      });
+    }
+
+    for (const days of [1, 7]) {
+      it(`uses daily series points for cumulative DLI graph markers with days=${days}`, async () => {
+        clockForStats();
+        const hass = fakeHass();
+        hass.config.time_zone = 'UTC';
+        hass.states['sensor.dli'] = state('0.7', { state_class: 'total_increasing' });
+        const card = await mount(full({ show_bars: ['dli'], full_display: 'graph', metrics: { dli: { days } } }), hass);
+        const history = rows(card)[0].history!;
+        expect(history.minPoint?.v).to.equal(days === 1 ? 0 : 0.7);
+        expect(history.maxPoint?.v).to.equal(days === 1 ? 0.7 : 12);
+        for (const point of [history.minPoint, history.maxPoint]) {
+          expect(history.series.some(p => p.t === point?.t && p.v === point?.v)).to.equal(true);
+        }
+        expect(calls(hass).map(call => [call.args[0].period, call.args[0].types])).to.deep.equal([['hour', ['state']]]);
+        card.remove();
+      });
+    }
+
+    it('shares the earliest fine graph window without changing ordinary summary tiles', async () => {
+      clockForStats();
+      const hass = fakeHass();
+      hass.config.time_zone = 'UTC';
+      const card = await mount(full({ show_bars: ['moisture', 'temperature', 'humidity'], full_display: 'graph',
+        metrics: { temperature: { period: '24h' }, humidity: { display: 'summary' } } }), hass);
+      const fineCall = calls(hass).find(call => call.args[0].period === '5minute')!.args[0];
+      expect(fineCall.statistic_ids).to.deep.equal(['sensor.moisture', 'sensor.temperature']);
+      expect(fineCall.start_time).to.equal(new Date(Date.now() - 86400000).toISOString());
+      expect(rows(card)[2].history?.stats).to.deep.equal({ min: 15, max: 35, mean: 25 });
+      expect(rows(card)[2].history?.minPoint?.v).to.equal(15);
+      expect(rows(card)[2].history?.maxPoint?.v).to.equal(35);
+      card.remove();
+    });
+
     it('defaults to Today and fetches from HA local midnight, retaining explicit 24h', async () => {
       const clock = clockForStats();
       const hass = fakeHass();
@@ -151,13 +217,13 @@ describe('material-plant-card', () => {
         const card = await mount(full({ show_bars: ['illuminance'], full_display: display }), hass);
         const row = rows(card)[0];
         expect(row.history?.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
-        expect(row.history?.minPoint).to.deep.equal({ t: boundary + 150000, v: 2000 });
-        expect(row.history?.maxPoint).to.deep.equal({ t: boundary + 150000, v: 4000 });
+        expect(row.history?.minPoint).to.deep.equal({ t: boundary + 150000, v: display === 'graph' ? 3000 : 2000 });
+        expect(row.history?.maxPoint).to.deep.equal({ t: boundary + 150000, v: display === 'graph' ? 3000 : 4000 });
         expect(row.events[0].t).to.equal(boundary);
         expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(display === 'graph' ? ['hour', '5minute'] : ['5minute']);
         expect(calls(hass).find(call => call.args[0].period === '5minute')!.args[0].start_time).to.equal(new Date(start).toISOString());
         if (display === 'graph') expect(row.history?.series).to.deep.equal([
-          { t: night + 1800000, v: 0 }, { t: Date.now(), v: 0 },
+          { t: boundary - 150000, v: 50000 }, { t: boundary + 150000, v: 3000 }, { t: Date.now(), v: 0 },
         ]);
         card.remove();
       });
@@ -177,6 +243,8 @@ describe('material-plant-card', () => {
       expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(['hour']);
       expect(rows(card)[0].history?.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
       expect(rows(card)[0].history?.series.map(point => point.v)).to.deep.equal([3000, 10000, 0]);
+      expect(rows(card)[0].history?.minPoint).to.deep.equal({ t: day + 1800000, v: 3000 });
+      expect(rows(card)[0].history?.maxPoint).to.deep.equal({ t: day + 1800000, v: 3000 });
       expect(rows(card)[0].events).to.deep.equal([]);
       card.remove();
     });
@@ -206,7 +274,7 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
-    it('preserves fine summaries when their refresh fails while updating the hourly graph', async () => {
+    it('preserves fine summaries and fine graph series when their refresh fails', async () => {
       const clock = clockForStats();
       const hass = illuminanceHass('3000');
       let failFine = false;
@@ -222,7 +290,7 @@ describe('material-plant-card', () => {
       await clock.tickAsync(600000);
       await settle(card);
       expect(rows(card)[0].history?.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
-      expect(rows(card)[0].history?.series[0].v).to.equal(50000);
+      expect(rows(card)[0].history?.series[0].v).to.equal(3000);
       expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(['hour', '5minute', 'hour', '5minute']);
       card.remove();
     });
@@ -359,7 +427,7 @@ describe('material-plant-card', () => {
       ];
       const fine = [
         { start: day, end: day + 300000, min: 2000, max: 4000, mean: 3000 },
-        { start: night, end: night + 300000, min: 0, max: 90000, mean: 50000 },
+        { start: night, end: night + 300000, min: 0, max: 0, mean: 0 },
       ];
       hass.callWS.callsFake(async (msg: Record<string, unknown>) => {
         if (msg.type === 'plant/get_info') return { result: { ...info,
@@ -370,10 +438,10 @@ describe('material-plant-card', () => {
       const row = rows(card)[0];
       expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(['hour', '5minute']);
       expect(row.history?.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
-      expect(row.history?.minPoint).to.deep.equal({ t: day + 150000, v: 2000 });
-      expect(row.history?.maxPoint).to.deep.equal({ t: day + 150000, v: 4000 });
+      expect(row.history?.minPoint).to.deep.equal({ t: day + 150000, v: 3000 });
+      expect(row.history?.maxPoint).to.deep.equal({ t: day + 150000, v: 3000 });
       expect(row.history?.series).to.deep.equal([
-        { t: day + 1800000, v: 6000 }, { t: night + 1800000, v: 0 }, { t: Date.now(), v: 0 },
+        { t: day + 150000, v: 3000 }, { t: night + 150000, v: 0 }, { t: Date.now(), v: 0 },
       ]);
       expect(row.tone).to.equal('advisory');
       expect(query(card, '.tile').classList.contains('problem')).to.equal(false);
@@ -402,6 +470,12 @@ describe('material-plant-card', () => {
       const row = rows(card)[0];
       await row.updateComplete;
       const graph = row.shadowRoot!.querySelector('mpl-history-graph')!;
+      expect(getComputedStyle(row).gridTemplateRows).to.equal('20px 28px 36px');
+      expect(row.getBoundingClientRect().height).to.equal(84);
+      expect(graph.getBoundingClientRect().height).to.equal(64);
+      const summaryRow = rows(card)[1];
+      await summaryRow.updateComplete;
+      expect(summaryRow.getBoundingClientRect().height).to.equal(68);
       const child = document.createElement('span');
       graph.append(child);
       child.addEventListener('click', (event) => event.stopPropagation());

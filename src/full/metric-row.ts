@@ -40,7 +40,7 @@ export class MplMetricRow extends LitElement {
   @property({ attribute: false }) events: { t: number; icon: string }[] = [];
   @property({ attribute: false }) graphStart?: number;
   @property({ attribute: false }) graphEnd?: number;
-  @property() display: FullDisplay = 'summary';
+  @property({ reflect: true }) display: FullDisplay = 'summary';
   @property({ type: Boolean }) daily = false;
   @property() periodText = 'today';
   @property() locale?: string;
@@ -142,6 +142,7 @@ export class MplMetricRow extends LitElement {
       --mpl-metric-unit-size: 13px;
       --mpl-metric-caption-size: 12px;
       --mpl-metric-caption-line: 20px;
+      --mpl-metric-graph-caption-track: 36px;
       --mpl-metric-period-line: 16px;
       --mpl-metric-stat-size: 11px;
       --mpl-metric-stat-line: 16px;
@@ -158,6 +159,12 @@ export class MplMetricRow extends LitElement {
       row-gap: 0;
       align-items: center;
       min-width: 0;
+    }
+    :host([display='graph']) {
+      grid-template-rows: var(--mpl-metric-label-line) var(--mpl-metric-value-line) var(--mpl-metric-graph-caption-track);
+    }
+    :host([display='graph']) .ideal {
+      align-self: start;
     }
     .title {
       grid-column: 1 / -1;
@@ -231,7 +238,7 @@ export class MplMetricRow extends LitElement {
       grid-column: 2;
       grid-row: 2 / 4;
       min-width: 0;
-      height: calc(var(--mpl-metric-value-line) + var(--mpl-metric-caption-line));
+      height: calc(var(--mpl-metric-value-line) + var(--mpl-metric-graph-caption-track));
     }
     .ideal {
       grid-column: 1;

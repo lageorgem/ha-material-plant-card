@@ -8,7 +8,7 @@ import { configForm } from './config-form';
 import { themeTokens } from './theme';
 import './gauge/plant-gauge';
 import './battery/battery-glyph';
-import { fetchHistory, summarizeHourly, summarizeDailyMax, localDayStart, type HistoryFetch, type RawHistory, type MetricHistory } from './data/history-stats';
+import { fetchHistory, summarizeHourly, summarizeDailyMax, seriesExtremes, localDayStart, type HistoryFetch, type RawHistory, type MetricHistory } from './data/history-stats';
 import { resolveMetric, periodStart } from './calc/metric-settings';
 import { isDaylight, sunEvents } from './calc/sun';
 import { describeWithStats } from './full/metric-row';
@@ -292,7 +292,8 @@ export class MaterialPlantCard extends LitElement {
           hourlyStart = Math.min(hourlyStart, start);
           const daylight = m.key === 'illuminance' && r.daylightOnly &&
             Number.isFinite(this.hass.config?.latitude) && Number.isFinite(this.hass.config?.longitude);
-          const useFine = daylight && r.periodMs <= 7 * 86400000;
+          const useFine = (daylight && r.periodMs <= 7 * 86400000) ||
+            (r.display === 'graph' && (r.period === 'today' || r.period === '24h'));
           if (useFine) {
             fine.add(m.sensor);
             fineStart = Math.min(fineStart, start);
@@ -633,10 +634,16 @@ export class MaterialPlantCard extends LitElement {
             ? summarizeDailyMax(m.sensor ? this._statsMap.cumulative[m.sensor] : undefined, { days: r.days, now, current: m.value, timeZone: tz })
             : summarizeHourly(m.sensor ? (useFine ? this._statsMap.fine : this._statsMap.hourly)[m.sensor] : undefined,
               { start, now, current: daylightNow ? m.value : null, keep });
-          const history = filtered && daylight && r.display === 'graph' ? {
-            ...summarizeHourly(m.sensor ? this._statsMap.hourly[m.sensor] : undefined, { start, now, current: m.value }),
-            minPoint: filtered.minPoint, maxPoint: filtered.maxPoint, stats: filtered.stats,
-          } : filtered;
+          let history = filtered;
+          if (filtered && r.display === 'graph') {
+            const fineGraph = r.period === 'today' || r.period === '24h';
+            const series = cumulative ? filtered.series : summarizeHourly(
+              m.sensor ? (fineGraph ? this._statsMap.fine : this._statsMap.hourly)[m.sensor] : undefined,
+              { start, now, current: m.value },
+            ).series;
+            const markerKeep = daylight ? (t: number) => isDaylight(t, t, lat!, lon!, r.daylightOffset) : undefined;
+            history = { ...filtered, series, ...seriesExtremes(series, markerKeep) };
+          }
           const problemTone = toneFor(m, problems);
           const tone = !cumulative && daylightNow && (m.status === 'low' || m.status === 'high') ? 'problem' : problemTone;
           const short = r.period === '24h' ? '24 h' : `${parseInt(r.period)} d`;
