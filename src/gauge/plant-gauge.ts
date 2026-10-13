@@ -1,5 +1,6 @@
 import { LitElement, html, svg, css, nothing, type TemplateResult } from 'lit';
 import { property } from 'lit/decorators.js';
+import { keyed } from 'lit/directives/keyed.js';
 import type { GaugeTone } from '../types';
 import { themeTokens } from '../theme';
 
@@ -12,6 +13,7 @@ const SWEEP = 270;
 /** Vertical centre of the circle, in the 48-unit viewBox. */
 export const ICON_CENTER_Y = CY;
 const HALF_GAP = 4;
+const ENTRY_DURATION = 700;
 const ZONES = [
   { name: 'low', start: START, end: START + SWEEP * 0.2 - HALF_GAP },
   { name: 'ok', start: START + SWEEP * 0.2 + HALF_GAP, end: START + SWEEP * 0.8 - HALF_GAP },
@@ -40,6 +42,30 @@ export class MplGauge extends LitElement {
   @property() label = '';
   @property({ type: Boolean, attribute: 'embedded' }) embedded = false;
 
+  private dataEpoch = 0;
+  private hadIndicator = false;
+  private entrySegments: { duration: number; delay: number }[] = [];
+  private sweepDuration = 0;
+
+  protected willUpdate(): void {
+    const showIndicator = this.fraction !== null && this.tone !== 'unknown';
+    if (showIndicator && !this.hadIndicator) {
+      this.dataEpoch++;
+      const end = START + SWEEP * this.fraction!;
+      const lengths = ZONES.map(zone => Math.max(0, Math.min(zone.end, end) - zone.start));
+      const total = lengths.reduce((sum, length) => sum + length, 0);
+      let delay = 0;
+      this.entrySegments = lengths.map(length => {
+        const duration = total > 0 ? ENTRY_DURATION * length / total : 0;
+        const segment = { duration, delay };
+        delay += duration;
+        return segment;
+      });
+      this.sweepDuration = delay;
+    }
+    this.hadIndicator = showIndicator;
+  }
+
   protected render(): TemplateResult {
     const fraction = this.fraction;
     const showIndicator = fraction !== null && this.tone !== 'unknown';
@@ -62,22 +88,25 @@ export class MplGauge extends LitElement {
               ${ZONES.map(zone => svg`
                 <path class=${`track-${zone.name}`} d=${arcPath(CX, CY, RADIUS, zone.start, zone.end)}></path>
               `)}
-              ${showIndicator ? ZONES.map(zone => {
+              ${showIndicator ? keyed(this.dataEpoch, svg`
+              ${ZONES.map((zone, index) => {
                 if (end <= zone.start) return nothing;
                 const activePath = arcPath(CX, CY, RADIUS, zone.start, Math.min(zone.end, end));
+                const entry = this.entrySegments[index];
                 return svg`
-                  <path class=${`active active-${zone.name}`} d=${activePath} style=${`d: path('${activePath}')`}></path>
+                  <path class=${`active active-${zone.name}${entry.duration > 0 ? ' entering' : ''}`}
+                    pathLength="1" d=${activePath}
+                    style=${`d: path('${activePath}'); --mpl-gauge-entry-duration: ${entry.duration}ms; --mpl-gauge-entry-delay: ${entry.delay}ms;`}></path>
                 `;
-              }) : nothing}
-              ${showIndicator ? svg`
+              })}
                 <circle class="dot" cx=${dot.x} cy=${dot.y} r="3.5"
-                  style=${`cx: ${dot.x}px; cy: ${dot.y}px;`}></circle>
-              ` : nothing}
+                  style=${`cx: ${dot.x}px; cy: ${dot.y}px; --mpl-gauge-entry-delay: ${this.sweepDuration}ms;`}></circle>
+              `) : nothing}
             `}
           </svg>
           <ha-icon icon=${this.icon} aria-hidden="true"></ha-icon>
         </div>
-        ${this.value !== '' ? html`<div class="value">${this.value}</div>` : nothing}
+        ${keyed(this.dataEpoch, this.value !== '' ? html`<div class="value">${this.value}</div>` : nothing)}
       </div>
     `;
   }
@@ -86,10 +115,12 @@ export class MplGauge extends LitElement {
     themeTokens,
     css`
       :host {
-        --mpl-gauge-size: 44px;
-        --mpl-gauge-icon-size: 18px;
-        --mpl-gauge-value-size: 12px;
-        --mpl-gauge-value-line: 16px;
+        --mpl-gauge-icon-size: calc(var(--mpl-gauge-size, 44px) * 18 / 44);
+        --mpl-gauge-value-size: clamp(11px, calc(var(--mpl-gauge-size, 44px) * 12 / 44), 16px);
+        --mpl-gauge-value-line: calc(var(--mpl-gauge-value-size) * 4 / 3);
+        --mpl-gauge-entry-easing: cubic-bezier(0.2, 0, 0, 1);
+        --mpl-gauge-pop-duration: 250ms;
+        --mpl-gauge-fade-duration: 300ms;
         --mpl-gauge-track-width: ${STROKE};
         --mpl-gauge-outer-track-width: 2;
         --mpl-gauge-dot-stroke: 2;
@@ -119,8 +150,8 @@ export class MplGauge extends LitElement {
         position: relative;
         display: grid;
         place-items: center;
-        width: var(--mpl-gauge-size);
-        height: var(--mpl-gauge-size);
+        width: var(--mpl-gauge-size, 44px);
+        height: var(--mpl-gauge-size, 44px);
       }
       svg,
       ha-icon {
@@ -159,6 +190,27 @@ export class MplGauge extends LitElement {
         stroke-width: var(--mpl-gauge-dot-stroke);
         transition: cx var(--mpl-gauge-motion), cy var(--mpl-gauge-motion),
           fill var(--mpl-gauge-motion);
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: mpl-gauge-pop var(--mpl-gauge-pop-duration) var(--mpl-gauge-entry-easing)
+          var(--mpl-gauge-entry-delay) backwards;
+      }
+      .active.entering {
+        stroke-dasharray: 1;
+        animation: mpl-gauge-sweep var(--mpl-gauge-entry-duration) var(--mpl-gauge-entry-easing)
+          var(--mpl-gauge-entry-delay) backwards;
+      }
+      @keyframes mpl-gauge-sweep {
+        from { stroke-dashoffset: 1; }
+        to { stroke-dashoffset: 0; }
+      }
+      @keyframes mpl-gauge-pop {
+        from { transform: scale(0); opacity: 0; }
+        to { transform: scale(1); opacity: 1; }
+      }
+      @keyframes mpl-gauge-fade {
+        from { opacity: 0; }
+        to { opacity: 1; }
       }
       ha-icon {
         --mdc-icon-size: var(--mpl-gauge-icon-size);
@@ -175,6 +227,7 @@ export class MplGauge extends LitElement {
         color: var(--mpl-on-surface-variant);
       }
       .value {
+        animation: mpl-gauge-fade var(--mpl-gauge-fade-duration) var(--mpl-gauge-entry-easing);
         font-weight: 400;
         font-size: var(--mpl-gauge-value-size);
         line-height: var(--mpl-gauge-value-line);
@@ -194,6 +247,12 @@ export class MplGauge extends LitElement {
         .active,
         .dot {
           transition: none;
+        }
+        .active.entering,
+        .dot,
+        .value {
+          animation: none;
+          stroke-dasharray: none;
         }
       }
     `,

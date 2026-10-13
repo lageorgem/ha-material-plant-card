@@ -50,8 +50,12 @@ describe('mpl-gauge', () => {
       const centreY = box.top + box.height / 2;
       expect(centreY).to.be.closeTo(dial.top + dial.height / 2, 0.5);
       expect(box.left + box.width / 2).to.be.closeTo(dial.left + dial.width / 2, 0.5);
-      expect(box.width).to.equal(18);
-      expect(box.height).to.equal(18);
+      expect(dial.width).to.equal(size);
+      expect(dial.height).to.equal(size);
+      expect(box.width).to.be.closeTo(size * 18 / 44, 0.05);
+      expect(box.height).to.be.closeTo(size * 18 / 44, 0.05);
+      expect(parseFloat(getComputedStyle(root.querySelector('.value')!).fontSize))
+        .to.equal(size === 44 ? 12 : 16);
       const style = getComputedStyle(icon);
       expect(style.display).to.equal('flex');
       expect(style.alignItems).to.equal('center');
@@ -59,6 +63,64 @@ describe('mpl-gauge', () => {
       expect(style.lineHeight).to.equal('0px');
     });
   }
+
+  it('inherits the dial size from its parent and clamps small value text', async () => {
+    const wrapper = await fixture<HTMLDivElement>(html`
+      <div style="--mpl-gauge-size: 32px"><mpl-gauge value="13%"></mpl-gauge></div>
+    `);
+    const el = wrapper.querySelector('mpl-gauge')!;
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.dial')!.getBoundingClientRect().width).to.equal(32);
+    expect(getComputedStyle(el.shadowRoot!.querySelector('.value')!).fontSize).to.equal('11px');
+  });
+
+  it('sweeps segments sequentially, then pops the dot and fades the value', async () => {
+    const el = await mount(1, 'ok');
+    const styles = ['.active-low', '.active-ok', '.active-high'].map(selector =>
+      getComputedStyle(el.shadowRoot!.querySelector(selector)!));
+    for (const style of styles) expect(style.animationName).to.equal('mpl-gauge-sweep');
+    expect(parseFloat(styles[1].animationDelay)).to.be.at.least(parseFloat(styles[0].animationDuration));
+    expect(parseFloat(styles[2].animationDelay)).to.be.at.least(
+      parseFloat(styles[1].animationDelay) + parseFloat(styles[1].animationDuration));
+    const dot = getComputedStyle(el.shadowRoot!.querySelector('.dot')!);
+    expect(dot.animationName).to.equal('mpl-gauge-pop');
+    expect(parseFloat(dot.animationDelay)).to.be.closeTo(0.7, 0.001);
+    expect(getComputedStyle(el.shadowRoot!.querySelector('.value')!).animationName).to.equal('mpl-gauge-fade');
+    for (const path of el.shadowRoot!.querySelectorAll('.active')) {
+      expect(path.getAttribute('pathLength')).to.equal('1');
+    }
+  });
+
+  it('preserves entry animations on updates and recreates them after missing data', async () => {
+    const el = await mount(0.9, 'ok');
+    const active = el.shadowRoot!.querySelector('.active')!;
+    const dot = el.shadowRoot!.querySelector('.dot')!;
+    const animations = active.getAnimations();
+    el.fraction = 1;
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.active')).to.equal(active);
+    expect(el.shadowRoot!.querySelector('.dot')).to.equal(dot);
+    expect(active.getAnimations().filter(animation => animation instanceof CSSAnimation))
+      .to.deep.equal(animations.filter(animation => animation instanceof CSSAnimation));
+    el.fraction = null;
+    await el.updateComplete;
+    el.fraction = 0.9;
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.active')).not.to.equal(active);
+    expect(el.shadowRoot!.querySelector('.dot')).not.to.equal(dot);
+    expect(getComputedStyle(el.shadowRoot!.querySelector('.active')!).animationName).to.equal('mpl-gauge-sweep');
+  });
+
+  it('animates data arriving later without replaying entry for newly reached zones', async () => {
+    const el = await mount(null, 'ok');
+    el.fraction = 0.1;
+    await el.updateComplete;
+    expect(getComputedStyle(el.shadowRoot!.querySelector('.active')!).animationName).to.equal('mpl-gauge-sweep');
+    el.fraction = 0.9;
+    await el.updateComplete;
+    expect(getComputedStyle(el.shadowRoot!.querySelector('.active-ok')!).animationName).to.equal('none');
+    expect(getComputedStyle(el.shadowRoot!.querySelector('.active-high')!).animationName).to.equal('none');
+  });
 
   describe('motion preferences', () => {
     afterEach(async () => {
@@ -84,7 +146,10 @@ describe('mpl-gauge', () => {
         const style = getComputedStyle(element);
         expect(style.transitionProperty, `${selector} reduced-motion transition`).to.equal('none');
         expect(style.transitionDuration, `${selector} reduced-motion duration`).to.equal('0s');
+        expect(style.animationName, `${selector} reduced-motion animation`).to.equal('none');
+        if (selector !== '.dot') expect(style.strokeDasharray).to.equal('none');
       }
+      expect(getComputedStyle(el.shadowRoot!.querySelector('.value')!).animationName).to.equal('none');
     });
   });
 
