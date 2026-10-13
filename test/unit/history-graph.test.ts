@@ -49,6 +49,89 @@ function bubbleInside(el: MplHistoryGraph): void {
 }
 
 describe('mpl-history-graph', () => {
+  it('draws the line and fades isolated points before bringing in markers and the current ring', async () => {
+    const el = await mount([
+      ...points, { t: 110, f: null, label: 'Gap' }, { t: 120, f: 0.5, label: 'Isolated' },
+    ]);
+    el.minMarker = { t: 75, f: 0.1, ok: false };
+    el.maxMarker = { t: 0, f: 0.9, ok: false };
+    el.current = { t: 100, f: 0.6, tone: 'ok' };
+    el.events = [{ t: 50, icon: 'mdi:weather-sunset-up' }];
+    pointer(el, 'pointermove', 60);
+    await el.updateComplete;
+    const line = node(el, '.history-line');
+    expect(line.getAttribute('pathLength')).to.equal('1');
+    expect(getComputedStyle(line).animationName).to.equal('mpl-line-draw');
+    expect(getComputedStyle(line).animationDuration).to.equal('0.9s');
+    expect(getComputedStyle(line).strokeDasharray).to.equal('1px');
+    const isolated = node(el, '.isolated-point');
+    expect(getComputedStyle(isolated).animationName).to.equal('mpl-point-in');
+    expect(getComputedStyle(isolated).animationDelay).to.equal('0.3s');
+    const markers = [...el.shadowRoot!.querySelectorAll('.min-marker, .max-marker, .min-dot, .max-dot, .current-ring')];
+    expect(markers.length).to.equal(5);
+    for (const marker of markers) {
+      const style = getComputedStyle(marker);
+      expect(style.animationName).to.equal('mpl-mark-in');
+      expect(style.animationDelay).to.equal('0.7s');
+      expect(style.transformBox).to.equal('fill-box');
+      expect(style.opacity).to.equal('0');
+    }
+    for (const selector of ['.threshold-guide', '.event-line', '.event-icon', '.hover-guide', '.hover-dot', '.bubble']) {
+      expect(getComputedStyle(node(el, selector)).animationName).to.equal('none');
+    }
+    const animations = [line, isolated, ...markers].flatMap(shape => shape.getAnimations());
+    expect(animations.length).to.equal(7);
+    await Promise.all(animations.map(animation => animation.finished));
+    expect(getComputedStyle(line).strokeDashoffset).to.equal('0px');
+    for (const shape of [isolated, ...markers]) expect(getComputedStyle(shape).opacity).to.equal('1');
+  });
+
+  it('keeps the same line animation progressing during hover and touch scrubbing', async () => {
+    const el = await mount();
+    const line = node(el, '.history-line');
+    const animation = line.getAnimations()[0];
+    expect(animation).not.to.equal(undefined);
+    const time = Number(animation.currentTime);
+    for (const pointerType of ['mouse', 'touch']) {
+      pointer(el, 'pointerdown', 60, pointerType);
+      pointer(el, 'pointermove', 180, pointerType);
+      await el.updateComplete;
+      await frame();
+      expect(node(el, '.history-line')).to.equal(line);
+      expect(line.getAnimations()).to.deep.equal([animation]);
+    }
+    expect(Number(animation.currentTime)).to.be.greaterThan(time);
+  });
+
+  it('restarts the line animation when the graph is removed and appended again', async () => {
+    const el = await mount();
+    const parent = el.parentElement!;
+    const line = node(el, '.history-line');
+    const animation = line.getAnimations()[0];
+    expect(animation).not.to.equal(undefined);
+    await animation.finished;
+    el.remove();
+    parent.append(el);
+    await settle(el);
+    expect(node(el, '.history-line')).to.equal(line);
+    const restarted = line.getAnimations()[0];
+    expect(restarted).not.to.equal(undefined);
+    expect(restarted).not.to.equal(animation);
+    expect(restarted.playState).to.equal('running');
+    expect(Number(restarted.currentTime)).to.be.lessThan(900);
+  });
+
+  it('starts drawing when data arrives after an empty graph has mounted', async () => {
+    const el = await mount([]);
+    const line = node(el, '.history-line');
+    expect(line.getAnimations()).to.deep.equal([]);
+    el.points = points;
+    await el.updateComplete;
+    expect(node(el, '.history-line')).to.equal(line);
+    expect(getComputedStyle(line).animationName).to.equal('mpl-line-draw');
+    expect(line.getAnimations()[0].playState).to.equal('running');
+  });
+
   it('registers, exposes its summary, and renders an empty graph with guides', async () => {
     const el = await mount([]);
     expect(customElements.get('mpl-history-graph')).to.equal(MplHistoryGraph);
@@ -224,9 +307,10 @@ describe('mpl-history-graph', () => {
        for (const f of fractions) {
          for (const t of [0, 50, 100]) {
            el[kind === 'max' ? 'maxMarker' : 'minMarker'] = { t, f, ok: true };
-           await el.updateComplete;
-           const triangle = node<SVGPolygonElement>(el, `.${kind}-marker`);
-           const dot = node<SVGCircleElement>(el, `.${kind}-dot`);
+            await el.updateComplete;
+            const triangle = node<SVGPolygonElement>(el, `.${kind}-marker`);
+            const dot = node<SVGCircleElement>(el, `.${kind}-dot`);
+            await Promise.all(triangle.getAnimations().map(animation => animation.finished));
            gaps.push(Math.abs(triangle.points.getItem(0).y - dot.cy.baseVal.value));
            const host = el.getBoundingClientRect();
            const rect = triangle.getBoundingClientRect();
@@ -554,13 +638,21 @@ describe('mpl-history-graph', () => {
     await emulateMedia({ reducedMotion: 'reduce' });
     try {
       const el = await mount();
+      el.minMarker = { t: 75, f: 0.1, ok: false };
+      el.maxMarker = { t: 0, f: 0.9, ok: false };
+      el.current = { t: 100, f: 0.6, tone: 'ok' };
       pointer(el, 'pointermove', 60);
       await el.updateComplete;
-      for (const selector of ['.bubble', '.history-line', '.hover-dot']) {
+      for (const selector of ['.bubble', '.history-line', '.hover-dot', '.min-marker', '.max-marker', '.min-dot', '.max-dot', '.current-ring']) {
         const style = getComputedStyle(node(el, selector));
         expect(style.transitionDuration).to.equal('0s');
         expect(style.animationName).to.equal('none');
       }
+      expect(getComputedStyle(node(el, '.history-line')).strokeDasharray).to.equal('none');
+      expect(getComputedStyle(node(el, '.current-ring')).opacity).to.equal('1');
+      el.points = [{ t: 0, f: 0.5, label: 'Isolated' }];
+      await el.updateComplete;
+      expect(getComputedStyle(node(el, '.isolated-point')).animationName).to.equal('none');
     } finally { await emulateMedia({ reducedMotion: null }); }
   });
 });

@@ -264,7 +264,7 @@ export class MplHistoryGraph extends LitElement {
           y1=${y(f)} y2=${y(f)} stroke="var(--mpl-outline)" opacity="1" stroke-width="1" stroke-dasharray="3 3"></line>`)}
         ${events.map(event => svg`<line class="event-line" x1=${this._x(event.t)} x2=${this._x(event.t)}
           y1=${band} y2=${GRAPH_HEIGHT} stroke="var(--mpl-outline)" stroke-width="1" stroke-dasharray="3 3" opacity="1"></line>`)}
-        <path class="history-line" d=${path.trim()} fill="none" stroke=${gradient} stroke-width="2"
+        <path class="history-line" pathLength="1" d=${path.trim()} fill="none" stroke=${gradient} stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"></path>
         ${isolated.map(point => svg`<circle class="isolated-point" cx=${this._x(point.t)} cy=${y(point.f!)}
           r="1.5" fill=${gradient}></circle>`)}
@@ -297,6 +297,37 @@ export class MplHistoryGraph extends LitElement {
       cursor: crosshair;
     }
     svg { display: block; overflow: visible; }
+    .history-line:not([d=""]) {
+      stroke-dasharray: 1;
+      animation: mpl-line-draw 900ms cubic-bezier(0.2, 0, 0, 1) both;
+    }
+    .isolated-point {
+      animation: mpl-point-in 300ms cubic-bezier(0.2, 0, 0, 1) 300ms both;
+    }
+    .min-marker, .max-marker, .min-dot, .max-dot, .current-ring {
+      animation: mpl-mark-in 300ms var(--md-sys-motion-expressive-spatial-default, cubic-bezier(0.38, 1.21, 0.22, 1)) 700ms both;
+      transform-box: fill-box;
+      transform-origin: center;
+    }
+    @keyframes mpl-line-draw {
+      from { stroke-dashoffset: 1; }
+      to { stroke-dashoffset: 0; }
+    }
+    @keyframes mpl-point-in {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+    @keyframes mpl-mark-in {
+      from { opacity: 0; transform: scale(0.4); }
+      to { opacity: 1; transform: none; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .history-line:not([d=""]), .isolated-point,
+      .min-marker, .max-marker, .min-dot, .max-dot, .current-ring {
+        animation: none;
+        stroke-dasharray: none;
+      }
+    }
     .event-icon {
       position: absolute;
       top: 1px;
