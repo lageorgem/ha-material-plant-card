@@ -1,120 +1,96 @@
 import { expect } from '@open-wc/testing';
-import { graphScale } from '../../src/calc/graph-scale.js';
-import { gaugeFraction } from '../../src/calc/measurements.js';
+import { graphScale, niceStep } from '../../src/calc/graph-scale.js';
+
+describe('niceStep', () => {
+  for (const [span, target, expected] of [
+    [7, 2, 5], [0.37, 2, 0.2], [6700, 2, 5000], [0, 2, 1], [-1, 2, 1],
+    [2, 2, 1], [4, 2, 2], [5, 2, 2.5], [10, 2, 5], [18, 2, 10], [7, 4, 2],
+  ]) {
+    it(`rounds span ${span} with target ${target} to ${expected}`, () => {
+      expect(niceStep(span, target)).to.equal(expected);
+    });
+  }
+});
 
 describe('graphScale', () => {
-  it('expands below-minimum DLI values and keeps only the minimum threshold', () => {
-    const scale = graphScale([0.7, 1, 1.4], 6, 13, 'mol/m²/d');
-    expect(scale.mode).to.equal('below');
-    expect(scale.thresholdLow).to.equal(0.92);
-    expect(scale.thresholdHigh).to.equal(null);
-    expect(scale.map(0.7)).to.be.closeTo(0.08, 1e-12);
-    expect(scale.map(6)).to.be.closeTo(0.92, 1e-12);
-    expect(scale.map(1.4)).to.be.closeTo(0.08 + 0.84 * (1.4 - 0.7) / (6 - 0.7), 1e-12);
-    expect(scale.map(-10)).to.equal(0);
-    expect(scale.map(100)).to.equal(1);
-    expect(scale.map(null)).to.equal(null);
+  it('snaps temperature observations to nice bounds independently of ideal bounds', () => {
+    const scale = graphScale([20.1, 21, 22.4], 12, 32);
+    // span / 2 = 1.15, so the specified ceiling nice step is 2.
+    expect(scale.ticks).to.deep.equal([
+      { f: 0, label: '20' }, { f: 0.5, label: '22' }, { f: 1, label: '24' },
+    ]);
+    expect(scale.map(20)).to.equal(0);
+    expect(scale.map(24)).to.equal(1);
+    expect(scale.map(20.1)).to.be.closeTo(0.025, 1e-12);
+    expect(scale.map(22.4)).to.be.closeTo(0.6, 1e-12);
+    expect(scale.thresholdLow).to.equal(-2);
+    expect(scale.thresholdHigh).to.equal(3);
+    expect(scale.map(16)).to.equal(-1);
+    expect(scale.map(28)).to.equal(2);
   });
 
-  it('includes samples equal to the minimum when another is below', () => {
-    expect(graphScale([1, 6], 6, 13, '').mode).to.equal('below');
-  });
-
-  it('expands below-minimum lux in logarithmic space', () => {
-    const scale = graphScale([10, 100], 1000, 10000, 'lx');
-    expect(scale.mode).to.equal('below');
-    expect(scale.map(100)).to.be.closeTo(0.5, 1e-12);
-    expect(scale.map(0)).to.equal(0);
-    expect(scale.map(-1)).to.equal(0);
-    expect(scale.map(1000)).to.be.closeTo(0.92, 1e-12);
-  });
-
-  it('uses linear space for lux when the observed low is nonpositive', () => {
-    const scale = graphScale([0, 10], 100, 1000, 'lx');
-    expect(scale.map(50)).to.be.closeTo(0.5, 1e-12);
-  });
-
-  it('expands above-maximum values and keeps only the maximum threshold', () => {
-    const scale = graphScale([13, 20, 27], 6, 13, '');
-    expect(scale.mode).to.equal('above');
-    expect(scale.thresholdLow).to.equal(null);
-    expect(scale.thresholdHigh).to.equal(0.08);
-    expect(scale.map(13)).to.be.closeTo(0.08, 1e-12);
-    expect(scale.map(20)).to.be.closeTo(0.5, 1e-12);
-    expect(scale.map(27)).to.be.closeTo(0.92, 1e-12);
-    expect(scale.map(-100)).to.equal(0);
-    expect(scale.map(100)).to.equal(1);
-    expect(scale.map(null)).to.equal(null);
-  });
-
-  it('expands above-maximum lux in logarithmic space', () => {
-    const scale = graphScale([1000, 100000], 100, 1000, 'lx');
-    expect(scale.mode).to.equal('above');
-    expect(scale.map(10000)).to.be.closeTo(0.5, 1e-12);
-    expect(scale.map(0)).to.equal(0);
-    expect(scale.map(-1)).to.equal(0);
-  });
-
-  it('uses linear space above a nonpositive lux maximum', () => {
-    const scale = graphScale([0, 100], -10, 0, 'lx');
-    expect(scale.mode).to.equal('above');
-    expect(scale.map(50)).to.be.closeTo(0.5, 1e-12);
-  });
-
-  for (const values of [[1, 7], [12, 20], [1, 20], [6, 6], [13, 13]]) {
-    it(`uses the full gauge scale for ${values.join(', ')}`, () => {
-      for (const unit of ['', 'lx']) {
-        const scale = graphScale(values, 6, 13, unit);
-        expect(scale.mode).to.equal('full');
-        expect(scale.thresholdLow).to.equal(0.2);
-        expect(scale.thresholdHigh).to.equal(0.8);
-        for (const value of [...values, null, 0, 6, 13]) {
-          expect(scale.map(value)).to.equal(gaugeFraction(value, 6, 13, unit));
-        }
-      }
-    });
-  }
-
-  it('ignores null and nonfinite samples when selecting adaptive modes', () => {
-    expect(graphScale([null, NaN, Infinity, -Infinity, 1], 6, 13, '').mode).to.equal('below');
-    expect(graphScale([null, NaN, Infinity, -Infinity, 20], 6, 13, '').mode).to.equal('above');
-  });
-
-  it('uses full mode with no finite samples', () => {
-    for (const values of [[], [null], [NaN, Infinity, -Infinity]]) {
-      const scale = graphScale(values, 6, 13, '');
-      expect(scale.mode).to.equal('full');
-      expect(scale.thresholdLow).to.equal(0.2);
-      expect(scale.thresholdHigh).to.equal(0.8);
-      expect(scale.map(7)).to.equal(gaugeFraction(7, 6, 13, ''));
+  it('pads flat series by five percent or at least half a unit', () => {
+    for (const [value, low, high] of [[20, 19, 21], [-20, -21, -19], [0, -0.5, 0.5], [0.1, -0.5, 1]]) {
+      const scale = graphScale([value, value], null, null);
+      expect(scale.map(low)).to.equal(0);
+      expect(scale.map(high)).to.equal(1);
+      expect(scale.map(value)).to.be.closeTo((value - low) / (high - low), 1e-12);
+      expect(scale.ticks[0].f).to.equal(0);
+      expect(scale.ticks.at(-1)!.f).to.equal(1);
     }
   });
 
-  for (const [min, max] of [[6, 6], [13, 6], [NaN, 13], [6, NaN], [Infinity, 13], [6, Infinity], [-Infinity, 13], [6, -Infinity]]) {
-    it(`uses unknown-range mapping for invalid bounds ${min}, ${max}`, () => {
-      for (const values of [[1, 2], [20, 21], [1, 20]]) {
-        for (const unit of ['', 'lx']) {
-          const scale = graphScale(values, min, max, unit);
-          expect(scale.mode).to.equal('full');
-          expect(scale.thresholdLow).to.equal(null);
-          expect(scale.thresholdHigh).to.equal(null);
-          for (const value of [...values, null, 0, 6, 13, NaN, Infinity, -Infinity]) {
-            expect(scale.map(value)).to.equal(null);
-          }
-        }
-      }
-    });
-  }
+  it('pads nearly flat series below the specified tolerance', () => {
+    const scale = graphScale([20, 20 + 5e-10], 12, 32);
+    expect(scale.map(18)).to.equal(0);
+    expect(scale.map(22)).to.equal(1);
+  });
 
-  it('uses full mode with unknown thresholds when either bound is null', () => {
-    for (const [min, max] of [[null, 13], [6, null], [null, null]]) {
-      const scale = graphScale([1, 20], min, max, '');
-      expect(scale.mode).to.equal('full');
+  it('ignores null and nonfinite samples and maps invalid inputs to null', () => {
+    const scale = graphScale([null, NaN, Infinity, -Infinity, 20.1, 22.4], 12, 32);
+    expect(scale.ticks).to.deep.equal(graphScale([20.1, 22.4], 12, 32).ticks);
+    for (const value of [null, NaN, Infinity, -Infinity]) expect(scale.map(value)).to.equal(null);
+  });
+
+  it('returns no ticks, thresholds, or mapping when no finite samples exist', () => {
+    for (const values of [[], [null], [NaN, Infinity, -Infinity]]) {
+      const scale = graphScale(values, 12, 32);
+      expect(scale.ticks).to.deep.equal([]);
       expect(scale.thresholdLow).to.equal(null);
       expect(scale.thresholdHigh).to.equal(null);
-      for (const value of [1, 20, null, NaN, Infinity, -Infinity]) {
-        expect(scale.map(value)).to.equal(null);
-      }
+      for (const value of [null, 20, NaN, Infinity]) expect(scale.map(value)).to.equal(null);
     }
+  });
+
+  it('keeps observed scaling but removes thresholds for invalid ideal bounds', () => {
+    for (const [min, max] of [
+      [null, 32], [12, null], [null, null], [12, 12], [32, 12],
+      [NaN, 32], [12, NaN], [Infinity, 32], [12, Infinity], [-Infinity, 32], [12, -Infinity],
+    ]) {
+      const scale = graphScale([20.1, 22.4], min, max);
+      expect(scale.thresholdLow).to.equal(null);
+      expect(scale.thresholdHigh).to.equal(null);
+      expect(scale.map(20)).to.equal(0);
+      expect(scale.map(24)).to.equal(1);
+    }
+  });
+
+  it('uses linear illuminance scaling and compact k labels', () => {
+    const scale = graphScale([0, 6700], 2000, 30000);
+    expect(scale.ticks).to.deep.equal([
+      { f: 0, label: '0' }, { f: 0.5, label: '5k' }, { f: 1, label: '10k' },
+    ]);
+    expect(scale.map(6700)).to.equal(0.67);
+    expect(scale.thresholdLow).to.equal(0.2);
+    expect(scale.thresholdHigh).to.equal(3);
+  });
+
+  it('generates ascending fractional ticks including both decimal domain edges', () => {
+    const scale = graphScale([-0.1, 0.27], -0.05, 0.2);
+    expect(scale.ticks).to.deep.equal([
+      { f: 0, label: '-0.2' }, { f: 1 / 3, label: '0' },
+      { f: 2 / 3, label: '0.2' }, { f: 1, label: '0.4' },
+    ]);
+    for (const tick of scale.ticks) expect(tick.f).to.be.within(0, 1);
   });
 });

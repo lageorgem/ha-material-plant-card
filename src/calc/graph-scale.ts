@@ -1,58 +1,62 @@
-import { gaugeFraction } from './measurements';
+import { formatCaptionNumber } from './measurements';
+
+export interface GraphTick {
+  f: number;
+  label: string;
+}
 
 export interface GraphScale {
-  mode: 'full' | 'below' | 'above';
   map: (v: number | null) => number | null;
+  ticks: GraphTick[];
   thresholdLow: number | null;
   thresholdHigh: number | null;
+}
+
+export function niceStep(span: number, targetTicks: number): number {
+  if (span <= 0) return 1;
+  const raw = span / targetTicks;
+  const magnitude = 10 ** Math.floor(Math.log10(raw));
+  for (const factor of [1, 2, 2.5, 5, 10]) {
+    const step = magnitude * factor;
+    if (step >= raw) return step;
+  }
+  return magnitude * 10;
 }
 
 export function graphScale(
   values: readonly (number | null)[],
   min: number | null,
   max: number | null,
-  unit: string,
 ): GraphScale {
-  if (min === null || max === null || !Number.isFinite(min) || !Number.isFinite(max) || min >= max) {
-    return {
-      mode: 'full',
-      map: () => null,
-      thresholdLow: null,
-      thresholdHigh: null,
-    };
-  }
-  let lo = Infinity;
-  let hi = -Infinity;
+  let lo0 = Infinity;
+  let hi0 = -Infinity;
   for (const value of values) {
     if (value === null || !Number.isFinite(value)) continue;
-    lo = Math.min(lo, value);
-    hi = Math.max(hi, value);
+    lo0 = Math.min(lo0, value);
+    hi0 = Math.max(hi0, value);
   }
-  if (lo <= hi) {
-    const below = hi <= min && lo < min;
-    const above = lo >= max && hi > max;
-    if (below || above) {
-      const low = below ? lo : max;
-      const high = below ? min : hi;
-      const logarithmic = unit === 'lx' && low > 0;
-      const base = logarithmic ? Math.log(low) : low;
-      const span = (logarithmic ? Math.log(high) : high) - base;
-      return {
-        mode: below ? 'below' : 'above',
-        map: value => {
-          if (value === null) return null;
-          const transformed = logarithmic ? (value <= 0 ? -Infinity : Math.log(value)) : value;
-          return Math.max(0, Math.min(1, 0.08 + 0.84 * (transformed - base) / span));
-        },
-        thresholdLow: below ? 0.92 : null,
-        thresholdHigh: above ? 0.08 : null,
-      };
-    }
+  if (lo0 > hi0) return { map: () => null, ticks: [], thresholdLow: null, thresholdHigh: null };
+  if (hi0 - lo0 < 1e-9) {
+    const pad = Math.max(Math.abs(lo0) * 0.05, 0.5);
+    lo0 -= pad;
+    hi0 += pad;
   }
+  const step = niceStep(hi0 - lo0, 2);
+  const lowMultiple = Math.floor(lo0 / step);
+  const highMultiple = Math.ceil(hi0 / step);
+  const lo = lowMultiple * step;
+  const hi = highMultiple * step;
+  const map = (value: number | null): number | null =>
+    value === null || !Number.isFinite(value) ? null : (value - lo) / (hi - lo);
+  const ticks: GraphTick[] = [];
+  for (let multiple = lowMultiple; multiple <= highMultiple; multiple++) {
+    const value = multiple * step;
+    ticks.push({ f: map(value)!, label: formatCaptionNumber(value) });
+  }
+  const validIdeal = min !== null && max !== null && Number.isFinite(min) && Number.isFinite(max) && min < max;
   return {
-    mode: 'full',
-    map: value => gaugeFraction(value, min, max, unit),
-    thresholdLow: 0.2,
-    thresholdHigh: 0.8,
+    map, ticks,
+    thresholdLow: validIdeal ? map(min) : null,
+    thresholdHigh: validIdeal ? map(max) : null,
   };
 }

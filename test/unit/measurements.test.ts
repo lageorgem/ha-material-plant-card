@@ -1,6 +1,6 @@
 import { expect } from '@open-wc/testing';
 import {
-  activeProblems as calculateActiveProblems, batteryInfo, buildMeasurements, describeMeasurement, formatValue,
+  activeProblems as calculateActiveProblems, batteryInfo, buildMeasurements, describeMeasurement, formatCaptionNumber, formatValue,
   gaugeFraction, gaugeStatus, toneFor, tooltipLines, toNumber,
 } from '../../src/calc/measurements';
 import { DEFAULT_GAUGES, DEFAULT_ICONS, MEASUREMENT_KEYS, MEASUREMENT_LABELS } from '../../src/types';
@@ -125,6 +125,18 @@ describe('buildMeasurements', () => {
 });
 
 describe('measurement presentation', () => {
+  it('formats compact captions with decimal-safe rounding and k abbreviations', () => {
+    for (const [value, expected] of [
+      [21.6, '22'], [57.15, '57'], [9.95, '10'], [0.705, '0.7'],
+      [0.075, '0.08'], [0, '0'], [0.1, '0.1'], [10, '10'],
+      [1000, '1k'], [1450, '1.5k'], [30000, '30k'],
+      [-21.5, '-22'], [-0.15, '-0.2'], [-0.075, '-0.08'], [-1450, '-1.5k'],
+      [1e-7, '0'],
+    ] as const) {
+      expect(formatCaptionNumber(value), String(value)).to.equal(expected);
+    }
+  });
+
   it('provides two rounded tooltip lines with full units and ideal bounds', () => {
     for (const [overrides, expected] of [
       [{ label: 'Air humidity', value: 65.56, min: 20, max: 60, status: 'high' }, ['Air humidity · too high', '65.6 % · ideal 20–60 %']],

@@ -86,6 +86,17 @@ export function formatValue(value: number | null, unit: string, hideUnits = fals
   return text + suffix;
 }
 
+/** Compact visual captions; accessible descriptions retain formatValue precision. */
+export function formatCaptionNumber(value: number): string {
+  const magnitude = Math.abs(value);
+  if (magnitude >= 1000) return formatValue(value, '', true);
+  const digits = magnitude >= 10 ? 0 : magnitude >= 0.1 ? 1 : 2;
+  // Match measurements' decimal-safe rounding, including negative ties.
+  const [coefficient, exponent = '0'] = String(magnitude).split('e');
+  const shifted = Number(`${coefficient}e${Number(exponent) + digits}`);
+  return String(Math.sign(value) * Math.round(shifted) / 10 ** digits);
+}
+
 export function tooltipLines(m: Measurement): [string, string] {
   const num = (value: number): string => {
     const magnitude = Math.abs(value);
