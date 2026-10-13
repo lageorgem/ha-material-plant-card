@@ -20,12 +20,14 @@ hide_image: false
 # values, or the entire value text below compact-mode gauges.
 hide_units: false
 # Full only: history refreshes every 10 minutes.
-# Optional string: 24h (default), 3d, 7d, 14d or 30d.
+# Optional string: today (default), 24h, 3d, 7d, 14d or 30d.
+# today = midnight in HA's time zone to now; label: Today.
 # Editor: Metrics → History window; per-metric period overrides this.
 history_period: 7d
 # Optional string: summary (default) or graph; per-metric display overrides it.
 full_display: summary
-# All history uses recorder hourly statistics, not raw history.
+# History uses recorder statistics, not raw history; generally hourly.
+# Daylight illuminance summaries up to 7 days use 5-minute statistics.
 # Measurements need state_class: measurement; DLI uses hourly recorded states.
 hide_history: false
 # Optional map; all nested keys are optional. Editor: Per-metric settings.
@@ -40,9 +42,14 @@ metrics:
   illuminance:
     # Optional boolean, default true: use HA location's sunrise/sunset.
     daylight_only: true
-    # Optional number: 0–180 minutes, default 30. Count only whole hourly
-    # buckets inside sunrise + 45 minutes to sunset − 45 minutes here.
-    # Label: Daylight · 7 d; graph mode would show night hours as gaps.
+    # Optional number: 0–180 minutes, default 30. Golden-hour filter:
+    # sunrise + 45 minutes to sunset − 45 minutes here.
+    # Summary uses 5-minute statistics up to 7 days (cutoff within 5 minutes);
+    # 14/30-day summaries use whole hourly buckets inside the window.
+    # Label: Daylight · 7 d (Daylight · today with the default period).
+    # Graph line includes night readings; min/max triangles use daylight values.
+    # Up to 3 days, daylight_only enables golden-hour boundary icons above
+    # dashed vertical lines styled like the ideal guides.
     daylight_offset: 45
   moisture:
     # Optional string: plant, out_of_range, low, high or never.

@@ -37,7 +37,7 @@ Designed to pair with [Material Thermostat Card](https://github.com/lageorgem/ha
 
 ## Highlights
 
-- Full mode (default, as in flower-card): grouped Material 3 Expressive metric tiles with large values and ideal ranges. Choose summary range bars with Min/Avg/Max badges or interactive threshold-coloured history graphs. History windows span 24 hours to 30 days; DLI shows daily maxima including today.
+- Full mode (default, as in flower-card): grouped Material 3 Expressive metric tiles with large values and ideal ranges. Choose summary range bars with Min/Avg/Max badges or interactive threshold-coloured history graphs. History defaults to today, with rolling windows from 24 hours to 30 days; DLI shows daily maxima including today.
 - Compact mode: circular gauges with centred icons and three zones: **too low / just right / too high**, a thick in-range band, thin outer zones, an active arc and a position dot.
 - Success colour for in-range readings. Full-mode non-cumulative values, rings and title icons turn error red outside the ideal range, independently of problem settings, except for daylight-filtered illuminance outside its sun-based window; only selected problems add a faint red gradient tint. Compact gauges and cumulative current values keep the problem-setting colour.
 - Plant photo in an M3 Expressive cookie shape, with a placeholder for missing or broken images and a red error circle with a centred **!** when problems exist.
@@ -123,7 +123,7 @@ Defaults apply when keys are omitted. Only `type` and `entity` are required; eve
 | `hide_species` | boolean, optional | `false` | Hide species in either mode; does not hide problem summaries. | `true` |
 | `hide_image` | boolean, optional | `false` | Hide the photo/placeholder and its alert badge. | `true` |
 | `hide_units` | boolean, optional | `false` in both modes | Full: hides the unit next to each value, keeping the number. Compact: hides the **entire value text** below gauges. | `true` |
-| `history_period` | string (`24h`, `3d`, `7d`, `14d` or `30d`), optional | `24h` | Full only: default history window for non-cumulative measurements. Each metric can override it with `period`; DLI uses `days` instead. Editor: Metrics → History window. | `7d` |
+| `history_period` | string (`today`, `24h`, `3d`, `7d`, `14d` or `30d`), optional | `today` | Full only: default history window for non-cumulative measurements. `today` runs from midnight in Home Assistant's time zone to now. Each metric can override it with `period`; DLI uses `days` instead. Editor: Metrics → History window. | `7d` |
 | `full_display` | string (`summary` or `graph`), optional | `summary` | Default full-mode tile display; each metric can override it with `display`. | `graph` |
 | `metrics` | map of measurement keys to settings maps, optional | `{}` | Per-metric overrides; see [Per-metric settings](#per-metric-settings). | `{dli: {days: 14, display: graph}}` |
 | `hide_history` | boolean, optional | `false` | Full only: disables history fetching and hides history labels and summary statistics. Summary keeps the current-value scale; graph keeps empty ideal-bound guides. Current values and ideal ranges remain. | `true` |
@@ -164,10 +164,10 @@ Only measurements supplied by the integration are displayed. A measurement is al
 | --- | --- | --- | --- | --- |
 | `icon` | string, optional | Built-in metric icon | Override the icon in both modes; an empty string falls back. | `mdi:thermometer-lines` |
 | `problem_trigger` | string (`plant`, `out_of_range`, `low`, `high` or `never`), optional | Derived from `problem_source` and `problem_sensors` | Both modes: follow the plant monitor, flag either bound, flag only low/high, or never flag. Explicit values override global problem settings. | `low` |
-| `period` | string (`24h`, `3d`, `7d`, `14d` or `30d`), optional | `history_period` | Full-mode history window for non-cumulative measurements. | `14d` |
+| `period` | string (`today`, `24h`, `3d`, `7d`, `14d` or `30d`), optional | `history_period` (`today` when omitted) | Full-mode history window for non-cumulative measurements; `today` starts at midnight in Home Assistant's time zone. | `14d` |
 | `days` | number, optional | `7` | Full-mode cumulative history, including DLI: rounded and clamped to 1–30 days; `1` means today only. | `14` |
 | `display` | string (`summary` or `graph`), optional | `full_display` | Full-mode tile presentation. | `graph` |
-| `daylight_only` | boolean, optional | `true` for illuminance | Illuminance only, full mode: filter hourly statistics by sunrise/sunset, not lux value. | `false` |
+| `daylight_only` | boolean, optional | `true` for illuminance | Illuminance only, full mode: apply the golden-hour filter to summary statistics and graph min/max markers, not the graph line or lux value. | `false` |
 | `daylight_offset` | number, optional | `30` | Illuminance only: minutes excluded after sunrise and before sunset; rounded and clamped to 0–180. Used when daylight filtering is enabled. | `45` |
 
 ```yaml
@@ -203,7 +203,7 @@ Both modes show the same photo size and species line unless `hide_image` or `hid
 
 ## Reading full-mode tiles
 
-The title row shows an icon, metric name and history label. Non-cumulative measurements use **Last 24 h** by default; `history_period` or `metrics.<key>.period` selects `24h`, `3d`, `7d`, `14d` or `30d`. Daylight-filtered illuminance shows **Daylight · 24 h** (or the selected period). DLI shows **Today** or **Daily max · N d**. The left column shows the current value and unit, with **Ideal a–b** below it.
+The title row shows an icon, metric name and history label. Non-cumulative measurements use **Today** by default: midnight in Home Assistant's configured time zone to now. `history_period` or `metrics.<key>.period` selects `today`, `24h`, `3d`, `7d`, `14d` or `30d`; `24h` is a rolling window labelled **Last 24 h**. Daylight-filtered illuminance shows **Daylight · today** by default (or the selected period). DLI shows **Today** or **Daily max · N d**. The left column shows the current value and unit, with **Ideal a–b** below it.
 
 ### Summary display
 
@@ -213,23 +213,23 @@ Non-cumulative current values, rings and title icons turn error red outside idea
 
 ### Graph display
 
-Set `full_display: graph`, or `metrics.<key>.display: graph` for one tile. The right column becomes a history line: green inside the ideal band, error red outside. The minimum marker is an upward triangle on the bottom edge; the maximum marker is a downward triangle on the top edge. Each has a dot on the line at that point. Min/max markers turn red outside the ideal range; a ring marks the latest plotted value. There is no average marker or Min/Avg/Max row. Today-only DLI has no min/max triangles. Night hours appear as gaps in daylight-filtered illuminance.
+Set `full_display: graph`, or `metrics.<key>.display: graph` for one tile. The right column becomes a history line: green inside the ideal band, error red outside. The minimum marker is an upward triangle on the bottom edge; the maximum marker is a downward triangle on the top edge. Each has a dot on the line at that point. Min/max markers turn red outside the ideal range; a ring marks the latest plotted value. There is no average marker or Min/Avg/Max row. Today-only DLI has no min/max triangles. The illuminance line is unfiltered, including night readings; with `daylight_only` enabled, its min/max triangles use daylight values only.
 
 The scale adapts to the plotted values. If every value stays at or below the ideal minimum, the graph zooms to the data with the ideal minimum as a dashed line at the top. If every value stays at or above the ideal maximum, it zooms with the ideal maximum at the bottom. Otherwise, it uses the full scale with dashed guides at both ideal bounds. Lux graphs retain [logarithmic scaling](#reading-compact-mode-gauges).
 
-Illuminance graphs with history windows up to 3 days show sunrise and sunset as dotted vertical lines with sunrise/sunset icons, using Home Assistant's configured location. Graph time labels use Home Assistant's configured time zone.
+Illuminance graphs with history windows up to 3 days show golden-hour boundaries only when `daylight_only` is enabled: sunrise + `daylight_offset` and sunset − `daylight_offset`. Each boundary has a sunrise/sunset icon above a dashed vertical line styled like the ideal guides, using Home Assistant's configured location. Graph time labels use Home Assistant's configured time zone.
 
 Hover with a mouse, or touch and drag across the graph, to inspect a point's value and time. The hover bubble stays visible while hovered; **Escape** dismisses it. Touching or hovering the graph does **not** highlight or activate the tile or open more-info; tap the rest of the tile to open the sensor dialog.
 
 ### Daylight-filtered illuminance
 
-By default, `metrics.illuminance.daylight_only: true` uses Home Assistant's configured latitude and longitude to compute sunrise and sunset. An hourly statistics bucket counts only when the **entire hour** falls within **sunrise + offset** to **sunset − offset**. The default offset is 30 minutes at each end; set `metrics.illuminance.daylight_offset: 45` to exclude 45 minutes instead. This is a sun-based filter, not a test of the lux value.
+By default, `metrics.illuminance.daylight_only: true` uses Home Assistant's configured latitude and longitude to compute sunrise and sunset. The golden-hour filter counts readings from **sunrise + offset** to **sunset − offset**. The default offset is 30 minutes at each end; set `metrics.illuminance.daylight_offset: 45` to exclude 45 minutes instead. For windows up to 7 days, the summary range viewer uses Home Assistant's **5-minute statistics**, so the cutoff lands within 5 minutes of each boundary. For 14- and 30-day windows, it includes only whole hourly buckets inside the window. This is a sun-based filter, not a test of the lux value.
 
-A current reading outside that window is not added to history and is not automatically forced red. Its value and title icon (and summary ring) follow the selected problem trigger instead. Set `metrics.illuminance.daylight_only: false` to include all hours and restore automatic out-of-range current colouring. Without valid Home Assistant location coordinates, history uses all hours and the **Last …** label. Compact mode is unaffected by the daylight filter.
+A current reading outside that window is excluded from summary statistics and daylight min/max markers, but remains visible on the unfiltered graph line. It is not automatically forced red: its value and title icon (and summary ring) follow the selected problem trigger instead. Set `metrics.illuminance.daylight_only: false` to include all readings in statistics, hide golden-hour graph boundaries and restore automatic out-of-range current colouring. Without valid Home Assistant location coordinates, history is unfiltered and uses **Today** or the selected **Last …** label. Compact mode is unaffected by the daylight filter.
 
 ### History source and DLI
 
-All history comes from Home Assistant **recorder hourly statistics**, with no raw history requests. Non-cumulative measurements need recorder statistics and `state_class: measurement`; plant monitor measurement sensors provide that state class. Minimum and maximum use hourly extrema; the average is the mean of included hourly means. Graph points use hourly means plus the eligible current reading.
+All history comes from Home Assistant **recorder statistics**, with no raw history requests. Non-cumulative measurements need recorder statistics and `state_class: measurement`; plant monitor measurement sensors provide that state class. History uses hourly statistics except for the daylight-filtered illuminance summary, which uses 5-minute statistics for windows up to 7 days. Minimum and maximum use the included buckets' extrema; the average is the mean of their means. Graph points use hourly means plus the current reading; the illuminance line includes readings outside the daylight window.
 
 Cumulative sensors (`state_class: total` or `total_increasing`), including DLI, use the **maximum recorded value per local day**, taken from hourly states. Day boundaries use Home Assistant's configured time zone. For DLI this is the day's total. Set `metrics.dli.days` to 1–30 (default 7), independently of `history_period`. **Today is included**, with its partial total so far and the current reading. `days: 1` shows **Today** and graphs today's hourly readings; larger windows show **Daily max · N d** and one point per day. Summary Min/Avg/Max describe the daily maxima, while the large current value remains today's running total. Long-term statistics support 30-day windows when that data is available.
 
@@ -331,7 +331,7 @@ Use [Nerwyn's Material You theme](https://github.com/Nerwyn/material-you-theme) 
 | Gauge has no active indicator | Check that the sensor value and min/max thresholds are numeric and that minimum is below maximum. |
 | Out-of-range gauge is not red | Default problem behaviour follows the integration's triggers. Check those triggers and `problem_sensors`, or use `problem_source: gauges`. |
 | Values disappear in compact display | Check for `hide_units: true`; set it to `false` to restore value text (the default in both modes). |
-| Full tiles have no history range or line | Set `hide_history: false` and check recorder hourly statistics for the sensor. Measurement sensors need `state_class: measurement`; DLI needs recorded hourly states. Daylight-filtered illuminance needs whole hourly buckets inside the sun-based window and valid Home Assistant location coordinates. DLI includes today's partial total; longer windows require existing statistics. Current values still display. |
+| Full tiles have no history range or line | Set `hide_history: false` and check recorder statistics for the sensor. Measurement sensors need `state_class: measurement`; DLI needs recorded hourly states. Daylight-filtered illuminance summaries use 5-minute statistics up to 7 days and whole hourly buckets for 14/30 days; check for data inside the sun-based window and valid Home Assistant location coordinates. Its graph line includes night readings. DLI includes today's partial total; longer windows require existing statistics. Current values still display. |
 | No battery indicator | Set `battery_sensor` and confirm that entity exists. Battery is not auto-detected. |
 | Photo shows a placeholder | Check `image` or the plant's `entity_picture` and whether the browser can load it. |
 
