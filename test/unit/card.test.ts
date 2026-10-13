@@ -101,6 +101,32 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
+    it('passes each hourly tile window and now, but clears domain overrides for cumulative tiles', async () => {
+      clockForStats();
+      const hass = fakeHass();
+      hass.config.time_zone = 'Pacific/Kiritimati';
+      const card = await mount(full({ show_bars: ['moisture', 'temperature', 'dli'], full_display: 'graph',
+        metrics: { temperature: { period: '3d' } } }), hass);
+      const now = Date.now();
+      expect(rows(card).map(row => [row.graphStart, row.graphEnd])).to.deep.equal([
+        [localDayStart(now, 0, hass.config.time_zone), now], [now - 3 * 86400000, now],
+        [localDayStart(now, 0, hass.config.time_zone), now],
+      ]);
+      hass.states['sensor.dli'] = state('0.2', { state_class: 'total_increasing' });
+      for (const days of [1, 7]) {
+        card.setConfig(full({ show_bars: ['moisture', 'temperature', 'dli'], full_display: 'graph',
+          metrics: { temperature: { period: '3d' }, dli: { days } } }));
+        await settle(card);
+        const row = rows(card)[2];
+        expect(row.graphStart).to.equal(undefined);
+        expect(row.graphEnd).to.equal(undefined);
+        const graph = row.shadowRoot!.querySelector('mpl-history-graph')!;
+        expect(graph.start).to.equal(row.history!.series[0].t);
+        expect(graph.end).to.equal(row.history!.series[row.history!.series.length - 1].t);
+      }
+      card.remove();
+    });
+
     for (const display of ['summary', 'graph'] as const) {
       it(`uses five-minute golden-hour extrema with an unfiltered ${display} graph source`, async () => {
         const clock = clockForStats();

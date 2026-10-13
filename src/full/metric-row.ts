@@ -38,14 +38,16 @@ export class MplMetricRow extends LitElement {
   @property({ reflect: true }) tone: GaugeTone = 'unknown';
   @property({ attribute: false }) history: MetricHistory | null = null;
   @property({ attribute: false }) events: { t: number; icon: string }[] = [];
+  @property({ attribute: false }) graphStart?: number;
+  @property({ attribute: false }) graphEnd?: number;
   @property() display: FullDisplay = 'summary';
   @property({ type: Boolean }) daily = false;
-  @property() periodText = 'last 24 h';
+  @property() periodText = 'today';
   @property() locale?: string;
   @property({ attribute: 'time-zone' }) timeZone?: string;
   @property({ type: Boolean, attribute: 'hide-units' }) hideUnits = false;
   @property({ type: Boolean, attribute: 'show-history' }) showHistory = true;
-  @property({ type: String, attribute: 'period-label' }) periodLabel = 'Last 24 h';
+  @property({ type: String, attribute: 'period-label' }) periodLabel = 'Today';
 
   protected render(): TemplateResult | typeof nothing {
     const m = this.measurement;
@@ -64,8 +66,9 @@ export class MplMetricRow extends LitElement {
       const series = this.history?.series ?? [];
       const scale = graphScale(series.map(({ v }) => v), m.min, m.max, m.unit);
       const last = series[series.length - 1];
-      const end = last?.t ?? Date.now();
-      const start = series[0]?.t ?? end - 86400000;
+      const explicitDomain = Number.isFinite(this.graphStart) && Number.isFinite(this.graphEnd);
+      const end = explicitDomain ? this.graphEnd! : last?.t ?? Date.now();
+      const start = explicitDomain ? this.graphStart! : series[0]?.t ?? end - 86400000;
       const timeOptions: Intl.DateTimeFormatOptions = this.daily
         ? { weekday: 'short', day: 'numeric', month: 'short' }
         : end - start <= 86400000

@@ -48,7 +48,7 @@ describe('mpl-metric-row', () => {
       'HA-ICON', 'SPAN', 'SPAN',
     ]);
     expect(element(el, '.label').textContent).to.equal('Moisture');
-    expect(element(el, '.period').textContent).to.equal('Last 24 h');
+    expect(element(el, '.period').textContent).to.equal('Today');
     expect(element(el, 'ha-icon').getAttribute('icon')).to.equal('mdi:water');
     expect(element(el, 'ha-icon').getAttribute('aria-hidden')).to.equal('true');
     expect(getComputedStyle(element(el, '.title')).gap).to.equal('6px');
@@ -68,7 +68,7 @@ describe('mpl-metric-row', () => {
 
   it('defaults the period label and reactively renders custom labels only with history', async () => {
     const el = await row();
-    expect(el.periodLabel).to.equal('Last 24 h');
+    expect(el.periodLabel).to.equal('Today');
     for (const periodLabel of ['Last 7 d', 'Daily · 7 d']) {
       el.periodLabel = periodLabel;
       await el.updateComplete;
@@ -134,7 +134,7 @@ describe('mpl-metric-row', () => {
     const el = await row(moisture, null);
     expect(badges(el).map(stat => stat.children[1].textContent)).to.deep.equal(['—', '—', '—']);
     expect(badges(el).some(stat => stat.classList.contains('out'))).to.equal(false);
-    expect(element(el, '.period').textContent).to.equal('Last 24 h');
+    expect(element(el, '.period').textContent).to.equal('Today');
     el.showHistory = false;
     await el.updateComplete;
     expect(el.shadowRoot!.querySelector('.stats')).to.equal(null);
@@ -296,9 +296,11 @@ describe('mpl-metric-row graph display', () => {
     summary: string;
   };
   const graph = (el: MplMetricRow) => element(el, 'mpl-history-graph') as HTMLElement & GraphProps;
-  async function graphRow(measurement = moisture, data: MetricHistory | null = history) {
+  async function graphRow(measurement = moisture, data: MetricHistory | null = history,
+    domain: { graphStart?: number; graphEnd?: number } = {}) {
     return fixture<MplMetricRow>(html`
       <mpl-metric-row .measurement=${measurement} .history=${data}
+        .graphStart=${domain.graphStart} .graphEnd=${domain.graphEnd}
         display="graph" locale="en-GB" tone="problem"></mpl-metric-row>
     `);
   }
@@ -307,7 +309,7 @@ describe('mpl-metric-row graph display', () => {
     const summary = await row();
     expect(summary.display).to.equal('summary');
     expect(summary.daily).to.equal(false);
-    expect(summary.periodText).to.equal('last 24 h');
+    expect(summary.periodText).to.equal('today');
     expect(summary.shadowRoot!.querySelector('mpl-history-graph')).to.equal(null);
     const el = await graphRow();
     expect(el.shadowRoot!.querySelector('mpl-range-bar')).to.equal(null);
@@ -324,6 +326,51 @@ describe('mpl-metric-row graph display', () => {
     await el.updateComplete;
     expect(el.shadowRoot!.querySelector('mpl-history-graph')).to.equal(null);
     expect(badges(el)).to.have.length(3);
+  });
+
+  for (const missingHourly of [false, true]) {
+    it(`positions fine markers in the selected window with ${missingHourly ? 'missing' : 'later'} hourly history`, async () => {
+      const graphStart = Date.UTC(2026, 9, 13, 10);
+      const graphEnd = graphStart + 2 * hour;
+      const minPoint = { t: graphStart + 150000, v: 12 };
+      const maxPoint = { t: graphStart + 45 * 60000, v: 31 };
+      const series = missingHourly ? [] : [{ t: graphStart + 30 * 60000, v: 22 }];
+      const el = await graphRow(moisture, { stats, series, minPoint, maxPoint }, { graphStart, graphEnd });
+      el.style.width = '400px';
+      el.events = [{ t: graphStart + hour, icon: 'mdi:weather-sunset-up' }];
+      await el.updateComplete;
+      const props = graph(el);
+      for (let frame = 0; frame < 3; frame++) {
+        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
+      }
+      const svg = props.shadowRoot!.querySelector('svg')!;
+      const width = Number(svg.getAttribute('width'));
+      expect(width).to.be.greaterThan(0);
+      expect(props.start).to.equal(graphStart);
+      expect(props.end).to.equal(graphEnd);
+      for (const [selector, t] of [['.min-dot', minPoint.t], ['.max-dot', maxPoint.t]] as const) {
+        const x = Number(props.shadowRoot!.querySelector(selector)!.getAttribute('cx'));
+        expect(x).to.be.closeTo((t - graphStart) / (graphEnd - graphStart) * width, 1e-9);
+        expect(x).to.be.greaterThan(0);
+      }
+      expect(Number(props.shadowRoot!.querySelector('.event-line')!.getAttribute('x1'))).to.equal(width / 2);
+      if (!missingHourly) {
+        expect(Number(props.shadowRoot!.querySelector('.isolated-point')!.getAttribute('cx'))).to.equal(width / 4);
+      }
+      expect(props.summary).to.equal(describeWithStats(moisture, stats, 'today'));
+    });
+  }
+
+  it('falls back to series endpoints unless both domain bounds are finite', async () => {
+    for (const domain of [
+      {}, { graphStart: start - hour }, { graphEnd: start + 3 * hour },
+      { graphStart: NaN, graphEnd: start + 3 * hour },
+      { graphStart: start - hour, graphEnd: Infinity },
+    ]) {
+      const el = await graphRow(moisture, history, domain);
+      expect(graph(el).start).to.equal(start);
+      expect(graph(el).end).to.equal(start + 2 * hour);
+    }
   });
 
   it('maps fractions, gaps, markers, last-point current and period summary', async () => {

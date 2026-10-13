@@ -655,6 +655,7 @@ export class MaterialPlantCard extends LitElement {
               this._moreInfo(m.sensor ?? cfg.entity);
             }}>
             <mpl-metric-row .measurement=${m} .tone=${tone} .display=${r.display} .history=${history} .events=${events}
+              .graphStart=${cumulative ? undefined : start} .graphEnd=${cumulative ? undefined : now}
               .periodLabel=${periodLabel} .periodText=${periodText} .daily=${cumulative && r.days > 1}
               .locale=${this.hass!.locale?.language ?? this.hass!.language} .timeZone=${tz} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
           </div>`;
