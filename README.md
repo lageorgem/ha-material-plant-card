@@ -55,7 +55,7 @@ Full mode shows metric tiles with configurable history and DLI daily totals:
 
 Graph display replaces the summary scale and badges with interactive history:
 
-<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/graph-dark.png" alt="Full mode graphs: DLI below its ideal minimum in zoomed mode, edge min/max triangles and illuminance sunrise/sunset lines" width="327">
+<img src="https://raw.githubusercontent.com/lageorgem/ha-material-plant-card/master/assets/graph-dark.png" alt="Full mode graphs: DLI below its ideal minimum in zoomed mode, min/max triangles and illuminance sunrise/sunset lines" width="327">
 
 The dashboard above shows eleven plants in compact mode. This compact single-card view shows a plant needing attention:
 
@@ -213,7 +213,7 @@ Non-cumulative current values, rings and title icons turn error red outside idea
 
 ### Graph display
 
-Set `full_display: graph`, or `metrics.<key>.display: graph` for one tile. The right column becomes a history line: green inside the ideal band, error red outside. The minimum marker is an upward triangle on the bottom edge; the maximum marker is a downward triangle on the top edge. Each has a dot on the line at that point. Min/max markers turn red outside the ideal range; a ring marks the latest plotted value. There is no average marker or Min/Avg/Max row. Today-only DLI has no min/max triangles. The illuminance line is unfiltered, including night readings; with `daylight_only` enabled, its min/max triangles use daylight values only.
+Set `full_display: graph`, or `metrics.<key>.display: graph` for one tile. The right column becomes a history line: green inside the ideal band, error red outside. The minimum is a dot on the line with an upward triangle just below it; the maximum is a dot with a downward triangle just above it. Both are points of the plotted line, so hovering them shows their value. Today and 24-hour graphs plot 5-minute statistics; longer windows plot hourly values. Min/max markers turn red outside the ideal range; a ring marks the latest plotted value. There is no average marker or Min/Avg/Max row. The illuminance line is unfiltered, including night readings; with `daylight_only` enabled, its min/max triangles use daylight values only.
 
 The scale adapts to the plotted values. If every value stays at or below the ideal minimum, the graph zooms to the data with the ideal minimum as a dashed line at the top. If every value stays at or above the ideal maximum, it zooms with the ideal maximum at the bottom. Otherwise, it uses the full scale with dashed guides at both ideal bounds. Lux graphs retain [logarithmic scaling](#reading-compact-mode-gauges).
 
