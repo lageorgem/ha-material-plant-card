@@ -60,7 +60,8 @@ describe('resolveMetric', () => {
         problem_source: 'gauges', metrics: { illuminance: metric } }), 'illuminance');
       expect(resolved).to.deep.equal({ icon: typeof invalid === 'string' && invalid.length > 0 ? invalid : undefined,
         period: '7d', periodMs: PERIOD_MS['7d'], days: 7, trigger: 'out_of_range', display: 'graph',
-        daylightOnly: true, daylightOffset: 30 });
+        // `false` is a valid daylight_only value, not an invalid one.
+        daylightOnly: invalid !== false, daylightOffset: 30 });
     }
     const cfg = config({ history_period: 'bad', full_display: 'bad' } as unknown as Partial<MaterialPlantCardConfig>);
     expect(resolveMetric(cfg, 'moisture')).to.include({ period: '24h', display: 'summary' });
