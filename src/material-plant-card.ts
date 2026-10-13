@@ -15,6 +15,8 @@ import { describeWithStats } from './full/metric-row';
 const REFRESH_INTERVAL = 5000;
 const STATS_INTERVAL = 10 * 60 * 1000;
 const STATS_THROTTLE = 60 * 1000;
+const RETRY_INITIAL = 250;
+const RETRY_MAX = 4000;
 // One immutable, clean-room nine-lobe mask, shared by images and placeholders.
 const cookieMask = (() => {
   const points = Array.from({ length: 180 }, (_, index) => {
@@ -55,6 +57,9 @@ export class MaterialPlantCard extends LitElement {
   private _statsPending = true;
   private _statsInFlight?: number;
   private _statsTimer?: ReturnType<typeof setTimeout>;
+  private _statsRetryAt?: number;
+  private _statsRetryDelay = RETRY_INITIAL;
+  private _statsDataKeys: Partial<Record<keyof RawHistory['failedGroups'], string>> = {};
   private _gaugesObserver?: ResizeObserver;
   private _gaugesFrame?: number;
   private _gaugesInnerWidth?: number;
@@ -64,6 +69,8 @@ export class MaterialPlantCard extends LitElement {
   private _appliedRequest = 0;
   private _inFlight?: number;
   private _timer?: ReturnType<typeof setTimeout>;
+  private _retryAt?: number;
+  private _retryDelay = RETRY_INITIAL;
   private _pending = false;
   @state() private _tooltip?: HTMLButtonElement;
   @state() private _tooltipSource?: 'mouse' | 'touch' | 'focus';
@@ -323,6 +330,9 @@ export class MaterialPlantCard extends LitElement {
     this._statsPending ||= this._statsInFlight !== undefined;
     this._statsInFlight = undefined;
     if (dropMap) {
+      this._statsRetryAt = undefined;
+      this._statsRetryDelay = RETRY_INITIAL;
+      this._statsDataKeys = {};
       this._statsKey = undefined;
       this._statsPending = true;
       if (Object.keys(this._statsMap.hourly).length || Object.keys(this._statsMap.cumulative).length || Object.keys(this._statsMap.fine).length) {
@@ -342,6 +352,9 @@ export class MaterialPlantCard extends LitElement {
     if (!this.isConnected || !this.hass || !this._info || !this._config) return;
     const { fetch: sensors, key } = this._statsSensors(Date.now());
     if (key !== this._statsKey) {
+      this._statsRetryAt = undefined;
+      this._statsRetryDelay = RETRY_INITIAL;
+      this._statsDataKeys = {};
       this._statsKey = key;
       this._statsAppliedRequest = ++this._statsRequest;
       this._statsPending = true;
@@ -352,7 +365,8 @@ export class MaterialPlantCard extends LitElement {
       return;
     }
     const elapsed = Date.now() - this._statsLastFetch;
-    const wait = this._statsPending ? Math.max(0, STATS_THROTTLE - elapsed) : Math.max(0, STATS_INTERVAL - elapsed);
+    const wait = this._statsRetryAt !== undefined ? Math.max(0, this._statsRetryAt - Date.now())
+      : this._statsPending ? Math.max(0, STATS_THROTTLE - elapsed) : Math.max(0, STATS_INTERVAL - elapsed);
     clearTimeout(this._statsTimer);
     this._statsTimer = undefined;
     if (wait === 0) void this._fetchStats(sensors);
@@ -365,6 +379,8 @@ export class MaterialPlantCard extends LitElement {
 
   private async _fetchStats(sensors: HistoryFetch): Promise<void> {
     const hass = this.hass!;
+    const key = this._statsKey!;
+    this._statsRetryAt = undefined;
     const request = ++this._statsRequest;
     this._statsInFlight = request;
     this._statsPending = false;
@@ -374,6 +390,21 @@ export class MaterialPlantCard extends LitElement {
       callWS: <T>(message: Record<string, unknown>): Promise<T> => hass.callWS<T>(message as { type: string }),
     }, sensors, this._statsLastFetch);
     if (request > this._statsAppliedRequest && this.isConnected) {
+      const groups = ['hourly', 'cumulative', 'fine'] as const;
+      for (const group of groups) {
+        if (!result.failedGroups[group]) {
+          this._statsDataKeys[group] = Object.values(result[group]).some(series => series.length > 0) ? key : undefined;
+        }
+      }
+      const retry = groups.some(group => result.failedGroups[group] && this._statsDataKeys[group] !== key);
+      if (retry) {
+        this._statsPending = true;
+        this._statsRetryAt = Date.now() + this._statsRetryDelay;
+        this._statsRetryDelay = Math.min(RETRY_MAX, this._statsRetryDelay * 2);
+      } else {
+        this._statsRetryAt = undefined;
+        this._statsRetryDelay = RETRY_INITIAL;
+      }
       this._statsMap = {
         ...result,
         hourly: result.failedGroups.hourly ? this._statsMap.hourly : result.hourly,
@@ -416,6 +447,10 @@ export class MaterialPlantCard extends LitElement {
     this._statsPending = true;
     if (changedEntity || config.display_type === 'compact') this._stopStats(true);
     if (changedEntity) {
+      this._retryAt = undefined;
+      this._retryDelay = RETRY_INITIAL;
+      clearTimeout(this._timer);
+      this._timer = undefined;
       this._info = undefined;
       // Invalidate the old entity even when hass has not arrived yet.
       this._appliedRequest = ++this._request;
@@ -449,7 +484,8 @@ export class MaterialPlantCard extends LitElement {
     // Demand schedules a refresh without invalidating useful in-flight metadata.
     this._pending = true;
     if (!this.isConnected || !this.hass || !this._config) return;
-    const wait = Math.max(0, REFRESH_INTERVAL - (Date.now() - this._lastFetch));
+    const wait = this._retryAt !== undefined ? Math.max(0, this._retryAt - Date.now())
+      : Math.max(0, REFRESH_INTERVAL - (Date.now() - this._lastFetch));
     if (wait === 0) {
       if (this._timer !== undefined) clearTimeout(this._timer);
       this._timer = undefined;
@@ -467,17 +503,33 @@ export class MaterialPlantCard extends LitElement {
     const entity = this._config?.entity;
     if (!this.isConnected || !hass || !entity) return;
     this._pending = false;
+    this._retryAt = undefined;
     this._lastFetch = Date.now();
     const request = ++this._request;
     this._inFlight = request;
     try {
       const response = await hass.callWS<{ result: PlantInfo }>({ type: 'plant/get_info', entity_id: entity });
-      if (request > this._appliedRequest && entity === this._config?.entity && response?.result) {
+      if (!response?.result || typeof response.result !== 'object') throw new Error('Missing plant info');
+      if (request > this._appliedRequest && entity === this._config?.entity && this.isConnected) {
         this._info = response.result;
         this._appliedRequest = request;
+        if (this._retryAt !== undefined) {
+          clearTimeout(this._timer);
+          this._timer = undefined;
+          this._retryAt = undefined;
+          this._pending = false;
+        }
+        this._retryDelay = RETRY_INITIAL;
       }
     } catch {
       // Integration can be starting up/offline. Preserve last good metadata and live readings.
+      if (request > this._appliedRequest && entity === this._config?.entity && this.isConnected && this._info === undefined) {
+        this._retryAt = Date.now() + this._retryDelay;
+        this._retryDelay = Math.min(RETRY_MAX, this._retryDelay * 2);
+        clearTimeout(this._timer);
+        this._timer = undefined;
+        this._queueFetch();
+      }
     } finally {
       if (this._inFlight === request) this._inFlight = undefined;
     }

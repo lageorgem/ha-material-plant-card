@@ -71,6 +71,78 @@ const gauges = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAl
 describe('material-plant-card', () => {
   afterEach(() => sinon.restore());
 
+  describe('initial fetch retries', () => {
+    const clockForRetry = () => sinon.useFakeTimers({ now: Date.UTC(2026, 0, 15, 12), toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+
+    for (const failure of ['reject', 'empty', 'null', 'primitive']) {
+      it(`retries ${failure} info after 250 ms and renders tiles before one second`, async () => {
+        const clock = clockForRetry();
+        const hass = fakeHass();
+        if (failure === 'reject') hass.callWS.onFirstCall().rejects(new Error('starting'));
+        else hass.callWS.onFirstCall().resolves(failure === 'empty' ? {} : { result: failure === 'null' ? null : 'invalid' });
+        const card = await mount(cfg({ display_type: undefined }), hass);
+        expect(query(card, '.tile')).to.equal(null);
+        await clock.tickAsync(249);
+        expect(hass.callWS.callCount).to.equal(1);
+        await clock.tickAsync(1);
+        await settle(card);
+        expect(query(card, '.tile')).not.to.equal(null);
+        card.remove();
+        expect(clock.countTimers()).to.equal(0);
+      });
+    }
+
+    it('backs off, caps retries, and resets on success and entity change', async () => {
+      const clock = clockForRetry();
+      const hass = fakeHass();
+      hass.callWS.rejects(new Error('starting'));
+      const card = await mount(cfg(), hass);
+      for (const delay of [250, 500, 1000, 2000, 4000, 4000]) {
+        const count = hass.callWS.callCount;
+        assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, String(count)) } });
+        await clock.tickAsync(delay - 1);
+        expect(hass.callWS.callCount).to.equal(count);
+        await clock.tickAsync(1);
+        expect(hass.callWS.callCount).to.equal(count + 1);
+      }
+      hass.callWS.resolves({ result: info });
+      await clock.tickAsync(4000);
+      await settle(card);
+      expect(gauges(card)).to.have.length(6);
+      hass.callWS.rejects(new Error('offline'));
+      assign(card, { ...hass, states: { ...hass.states, [ENTITY]: state('ok', {}, 'refresh') } });
+      await clock.tickAsync(5000);
+      const count = hass.callWS.callCount;
+      await clock.tickAsync(4000);
+      expect(hass.callWS.callCount).to.equal(count);
+      card.setConfig(cfg({ entity: 'plant.other' }));
+      await clock.tickAsync(1000);
+      const changedCount = hass.callWS.callCount;
+      await clock.tickAsync(249);
+      expect(hass.callWS.callCount).to.equal(changedCount);
+      await clock.tickAsync(1);
+      expect(hass.callWS.callCount).to.equal(changedCount + 1);
+      card.remove();
+    });
+
+    it('cancels info retry on disconnect and resumes pending retry on reconnect', async () => {
+      const clock = clockForRetry();
+      const hass = fakeHass();
+      hass.callWS.onFirstCall().rejects(new Error('starting'));
+      const card = await mount(cfg(), hass);
+      const parent = card.parentElement!;
+      card.remove();
+      expect(clock.countTimers()).to.equal(0);
+      await clock.tickAsync(1000);
+      expect(hass.callWS.callCount).to.equal(1);
+      parent.append(card);
+      await clock.tickAsync(250);
+      await settle(card);
+      expect(gauges(card)).to.have.length(6);
+      card.remove();
+    });
+  });
+
   for (const hideImage of [false, true]) {
     it(`pads the header state layer without moving text or escaping the card (hide_image=${hideImage})`, async () => {
       const card = await mount(cfg({ hide_image: hideImage, battery_sensor: BATTERY }));
@@ -110,6 +182,52 @@ describe('material-plant-card', () => {
       hass.states['sensor.illuminance'] = state(value);
       return hass;
     };
+
+    it('backs off missing history, resets after success, and ignores old-key data', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      let fail = true;
+      hass.callWS.callsFake(async (msg: Record<string, unknown>) => {
+        if (msg.type === 'plant/get_info') return { result: info };
+        if (fail) throw new Error('starting');
+        return { 'sensor.moisture': [{ start: Date.now() - 3600000, end: Date.now(), min: 15, max: 35, mean: 25 }] };
+      });
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
+      for (const delay of [250, 500, 1000, 2000, 4000, 4000]) {
+        const count = calls(hass).length;
+        await clock.tickAsync(delay - 1);
+        expect(calls(hass)).to.have.length(count);
+        await clock.tickAsync(1);
+        expect(calls(hass)).to.have.length(count + 1);
+      }
+      fail = false;
+      await clock.tickAsync(4000);
+      await settle(card);
+      expect(rows(card)[0].history?.stats?.mean).to.equal(25);
+      fail = true;
+      await clock.tickAsync(600000);
+      const count = calls(hass).length;
+      await clock.tickAsync(4000);
+      expect(calls(hass)).to.have.length(count);
+      card.setConfig(full({ metrics: [{ type: 'moisture', period: '3d' }] }));
+      await clock.tickAsync(56000);
+      const changedCount = calls(hass).length;
+      await clock.tickAsync(249);
+      expect(calls(hass)).to.have.length(changedCount);
+      await clock.tickAsync(1);
+      expect(calls(hass)).to.have.length(changedCount + 1);
+      const parent = card.parentElement!;
+      card.remove();
+      expect(clock.countTimers()).to.equal(0);
+      await clock.tickAsync(1000);
+      expect(calls(hass)).to.have.length(changedCount + 1);
+      fail = false;
+      parent.append(card);
+      await clock.tickAsync(500);
+      await settle(card);
+      expect(calls(hass)).to.have.length(changedCount + 2);
+      card.remove();
+    });
 
     for (const period of ['today', '24h', '3d'] as const) {
       it(`plots ${period === '3d' ? 'hourly' : 'five-minute'} means and uses series points for ${period} graph markers`, async () => {
@@ -977,9 +1095,12 @@ describe('material-plant-card', () => {
       expect(rows(card)[0].history?.stats).to.deep.equal({ min: 15, max: 35, mean: 25 });
       expect(rows(card)[1].history?.stats).to.deep.equal({ min: 0.7, max: 0.7, mean: 0.7 });
 
-      await clock.tickAsync(600000);
+      await clock.tickAsync(249);
+      expect(calls(hass)).to.have.length(2);
+      await clock.tickAsync(1);
       await settle(card);
       expect(rows(card)[1].history?.stats).to.deep.equal({ min: 0.7, max: 12, mean: (8 + 12 + 0.7) / 3 });
+      expect(calls(hass)).to.have.length(4);
 
       const nextCall = hass.callWS.callCount;
       hass.callWS.onCall(nextCall).rejects(new Error('hourly offline'));
