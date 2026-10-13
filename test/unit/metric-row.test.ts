@@ -420,9 +420,9 @@ describe('mpl-metric-row graph display', () => {
   });
 
   for (const scenario of [
-    { name: 'below', values: [1, null, 2, 3], low: 4.5, high: 14.5 },
-    { name: 'above', values: [35, null, 37, 40], low: -5, high: -1 },
-    { name: 'dipping into ideal', values: [1, null, 10, 30], low: 1 / 3, high: 1 },
+    { name: 'below', values: [1, null, 2, 3] },
+    { name: 'above', values: [35, null, 37, 40] },
+    { name: 'dipping into ideal', values: [1, null, 10, 30] },
   ]) {
     it(`uses the ${scenario.name} scale for DLI points, markers and current`, async () => {
       const measurement: Measurement = { ...moisture, key: 'dli', unit: 'mol/d⋅m²', min: 10, max: 30, value: scenario.values[3]! };
@@ -438,8 +438,8 @@ describe('mpl-metric-row graph display', () => {
         if (expected === null) expect(point.f).to.equal(null);
         else expect(point.f).to.be.closeTo(expected, 1e-12);
       }
-      expect(props.thresholdLow).to.equal(scenario.low);
-      expect(props.thresholdHigh).to.equal(scenario.high);
+      expect(props.thresholdLow).to.equal(scale.thresholdLow);
+      expect(props.thresholdHigh).to.equal(scale.thresholdHigh);
       expect(props.ticks).to.deep.equal(scale.ticks);
       expect(props.minMarker!.f).to.be.closeTo(fraction(minPoint.v)!, 1e-12);
       expect(props.maxMarker!.f).to.be.closeTo(fraction(maxPoint.v)!, 1e-12);
