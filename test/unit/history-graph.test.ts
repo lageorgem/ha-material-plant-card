@@ -51,7 +51,11 @@ function bubbleInside(el: MplHistoryGraph): void {
 describe('mpl-history-graph', () => {
   it('reserves a tick gutter and draws labelled gridlines below events and the series', async () => {
     const el = await mount();
-    el.ticks = [{ f: 0, label: '10' }, { f: 0.5, label: '20' }, { f: 1, label: '30' }];
+    el.ticks = [
+      { f: 0, label: '10', kind: 'min' },
+      { f: 0.5, label: '20', kind: 'avg' },
+      { f: 1, label: '30', kind: 'max' },
+    ];
     el.events = [{ t: 0, icon: 'mdi:water' }, { t: 50, icon: 'mdi:water' }];
     await el.updateComplete;
     expect(node(el, '.history-line').getAttribute('d')).to.match(/^M26,/);
@@ -61,13 +65,14 @@ describe('mpl-history-graph', () => {
     expect(labels.map(label => label.textContent)).to.deep.equal(['10', '20', '30']);
     for (const [index, y] of [56, 39, 22].entries()) {
       const line = gridlines[index];
+      expect(line.getAttribute('class')).to.equal(`gridline gridline-${el.ticks[index].kind}`);
       expect([line.x1.baseVal.value, line.x2.baseVal.value]).to.deep.equal([26, 240]);
       expect([line.y1.baseVal.value, line.y2.baseVal.value]).to.deep.equal([y, y]);
       const style = getComputedStyle(line);
-      expect(style.stroke).to.equal('rgb(100, 110, 120)');
+      expect(style.stroke).to.equal(index === 1 ? 'rgb(155, 143, 128)' : 'rgb(100, 110, 120)');
       expect(style.strokeWidth).to.equal('1px');
-      expect(style.strokeDasharray).to.equal('none');
-      expect(style.opacity).to.equal('0.6');
+      expect(style.strokeDasharray).to.equal(index === 1 ? '2px, 3px' : 'none');
+      expect(style.opacity).to.equal(index === 1 ? '0.7' : '0.6');
       expect(line.compareDocumentPosition(node(el, '.event-line')) & Node.DOCUMENT_POSITION_FOLLOWING).not.to.equal(0);
       expect(line.compareDocumentPosition(node(el, '.history-line')) & Node.DOCUMENT_POSITION_FOLLOWING).not.to.equal(0);
       const label = labels[index];
@@ -86,6 +91,42 @@ describe('mpl-history-graph', () => {
     await el.updateComplete;
     expect(node(el, '.history-line').getAttribute('d')).to.match(/^M0,/);
     expect(el.shadowRoot!.querySelector('.gridline, .tick-label, .threshold-guide')).to.equal(null);
+  });
+
+  it('skips empty labels without removing gridlines and reserves the gutter only for non-empty labels', async () => {
+    const el = await mount();
+    el.ticks = [
+      { f: 0, label: '10', kind: 'min' },
+      { f: 0.01, label: '', kind: 'avg' },
+      { f: 1, label: '30', kind: 'max' },
+    ];
+    await el.updateComplete;
+    const lines = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.gridline')];
+    expect(lines.length).to.equal(3);
+    expect(lines.map(line => line.x1.baseVal.value)).to.deep.equal([26, 26, 26]);
+    expect(node(el, '.gridline-avg').getAttribute('stroke-dasharray')).to.equal('2 3');
+    expect([...el.shadowRoot!.querySelectorAll('.tick-label')].map(label => label.textContent))
+      .to.deep.equal(['10', '30']);
+    el.ticks = el.ticks.map(tick => ({ ...tick, label: '' }));
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('text')).to.equal(null);
+    expect(lines.map(line => line.x1.baseVal.value)).to.deep.equal([0, 0, 0]);
+    expect(node(el, '.history-line').getAttribute('d')).to.match(/^M0,/);
+    el.ticks = [{ f: 0.5, label: '20', kind: 'avg' }];
+    await el.updateComplete;
+    expect(node(el, '.history-line').getAttribute('d')).to.match(/^M26,/);
+    expect(node(el, '.tick-label').textContent).to.equal('20');
+  });
+
+  it('keeps legacy ticks without a kind solid and faint', async () => {
+    const el = await mount();
+    el.ticks = [{ f: 0.5, label: '20' }];
+    await el.updateComplete;
+    const style = getComputedStyle(node(el, '.gridline'));
+    expect(style.stroke).to.equal('rgb(100, 110, 120)');
+    expect(style.strokeWidth).to.equal('1px');
+    expect(style.strokeDasharray).to.equal('none');
+    expect(style.opacity).to.equal('0.6');
   });
 
   it('maps markers, current, events, scrubbing and bubble clamps into the plot range', async () => {

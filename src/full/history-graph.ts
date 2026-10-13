@@ -5,7 +5,7 @@ import type { GaugeTone } from '../types';
 export interface GraphPoint { t: number; f: number | null; label: string; }
 export interface GraphMarker { t: number; f: number; ok: boolean; }
 export interface GraphCurrent { t: number; f: number; tone: GaugeTone; }
-export interface GraphTick { f: number; label: string; }
+export interface GraphTick { f: number; label: string; kind?: 'min' | 'avg' | 'max'; }
 
 export const GRAPH_HEIGHT = 64;
 export const ICON_BAND = 14;
@@ -99,7 +99,7 @@ export class MplHistoryGraph extends LitElement {
     window.removeEventListener('pointercancel', this._release);
   }
 
-  private get _plotLeft(): number { return this.ticks.length > 0 ? AXIS_W : 0; }
+  private get _plotLeft(): number { return this.ticks.some(tick => tick.label !== '') ? AXIS_W : 0; }
 
   private get _plotWidth(): number { return Math.max(0, this._width - this._plotLeft); }
 
@@ -270,10 +270,13 @@ export class MplHistoryGraph extends LitElement {
             <stop offset="1" stop-color=${colour(0, low, high)}></stop>
           </linearGradient>
         </defs>
-        ${this.ticks.map(tick => svg`<line class="gridline" x1=${this._plotLeft} x2=${this._width}
-          y1=${y(tick.f)} y2=${y(tick.f)} stroke="var(--mpl-outline-variant)" stroke-width="1" opacity="0.6"></line>
-          <text class="tick-label" x=${AXIS_W - 4} y=${y(tick.f)} text-anchor="end"
-            dominant-baseline="central">${tick.label}</text>`)}
+        ${this.ticks.map(tick => svg`<line class=${tick.kind ? `gridline gridline-${tick.kind}` : 'gridline'}
+          x1=${this._plotLeft} x2=${this._width} y1=${y(tick.f)} y2=${y(tick.f)}
+          stroke=${tick.kind === 'avg' ? 'var(--mpl-outline)' : 'var(--mpl-outline-variant)'}
+          stroke-width="1" stroke-dasharray=${tick.kind === 'avg' ? '2 3' : nothing}
+          opacity=${tick.kind === 'avg' ? '0.7' : '0.6'}></line>
+          ${tick.label !== '' ? svg`<text class="tick-label" x=${AXIS_W - 4} y=${y(tick.f)} text-anchor="end"
+            dominant-baseline="central">${tick.label}</text>` : nothing}`)}
         ${events.map(event => svg`<line class="event-line" x1=${this._x(event.t)} x2=${this._x(event.t)}
           y1=${band} y2=${GRAPH_HEIGHT} stroke="var(--mpl-outline)" stroke-width="1" stroke-dasharray="3 3" opacity="1"></line>`)}
         <path class="history-line" pathLength="1" d=${path.trim()} fill="none" stroke=${gradient} stroke-width="2"
