@@ -232,19 +232,19 @@ describe('activeProblems', () => {
         const flagged = problem_trigger === 'out_of_range' ? status === 'low' || status === 'high'
           : problem_trigger === 'low' || problem_trigger === 'high' ? status === problem_trigger : false;
         expect(activeProblems(okPlant, [measurement({ status })], {
-          metrics: { moisture: { problem_trigger } },
+          metrics: [{ type: 'moisture', problem_trigger }],
         })).to.deep.equal(flagged ? [{ key: 'moisture', label: 'Moisture', status }] : []);
       }
     }
     const problemPlant = { state: 'problem', attributes: { problems: [{ sensor_type: 'moisture', status: 'HIGH' }] } };
-    expect(activeProblems(problemPlant, [measurement()], { metrics: { moisture: { problem_trigger: 'never' } } }))
+    expect(activeProblems(problemPlant, [measurement()], { metrics: [{ type: 'moisture', problem_trigger: 'never' }] }))
       .to.deep.equal([]);
     expect(activeProblems(problemPlant, [measurement({ status: 'ok' })], {
-      metrics: { moisture: { problem_trigger: 'plant' } },
+      metrics: [{ type: 'moisture', problem_trigger: 'plant' }],
     })).to.deep.equal([{ key: 'moisture', label: 'Moisture', status: 'high' }]);
   });
 
-  it('orders shown measurements first, then unshown plant entries, deduplicating both', () => {
+  it('orders and deduplicates shown measurements without raising unshown plant entries', () => {
     const source = { state: 'problem', attributes: { problems: [
       { sensor_type: 'custom_key', status: 'other' }, { sensor_type: 'humidity', status: 'low' },
       { sensor_type: 'moisture', status: 'high' }, { sensor_type: 'temperature', status: 'high' },
@@ -252,22 +252,20 @@ describe('activeProblems', () => {
     ] } };
     const shown = [measurement({ key: 'temperature', label: 'Temperature', status: 'ok' }),
       measurement(), measurement({ status: 'high' }), measurement({ key: 'humidity', status: 'ok' })];
-    expect(activeProblems(source, shown, { metrics: {
-      moisture: { problem_trigger: 'out_of_range' }, humidity: { problem_trigger: 'low' },
-      co2: { problem_trigger: 'never' },
-    } })).to.deep.equal([
+    const metrics = [
+      { type: 'moisture', problem_trigger: 'out_of_range' }, { type: 'humidity', problem_trigger: 'low' },
+      { type: 'custom_key', problem_trigger: 'plant' },
+    ] satisfies NonNullable<MaterialPlantCardConfig['metrics']>;
+    expect(activeProblems(source, shown, { metrics })).to.deep.equal([
       { key: 'temperature', label: 'Temperature', status: 'high' },
       { key: 'moisture', label: 'Moisture', status: 'low' },
-      { key: 'custom_key', label: 'Custom key', status: 'problem' },
     ]);
-    expect(activeProblems(source, [], { problem_source: 'gauges', metrics: {
-      custom_key: { problem_trigger: 'plant' },
-    } })).to.deep.equal([{ key: 'custom_key', label: 'Custom key', status: 'problem' }]);
+    expect(activeProblems(source, [], { metrics })).to.deep.equal([]);
   });
 
-  it('lets an explicit trigger override legacy source and sensor filtering', () => {
-    expect(activeProblems(undefined, [measurement()], { problem_source: 'plant', problem_sensors: ['temperature'],
-      metrics: { moisture: { problem_trigger: 'low' } },
+  it('uses the first normalized entry for duplicate metric types', () => {
+    expect(activeProblems(undefined, [measurement()], {
+      metrics: [{ type: 'moisture', problem_trigger: 'low' }, { type: 'moisture', problem_trigger: 'never' }],
     })).to.deep.equal([{ key: 'moisture', label: 'Moisture', status: 'low' }]);
   });
   const plant = { state: 'problem', attributes: { problems: [
@@ -277,37 +275,34 @@ describe('activeProblems', () => {
   ] } };
 
   it('uses integration problems by default, normalizes statuses, and keeps first per key', () => {
-    expect(activeProblems(plant, [], {})).to.deep.equal([
+    const shown = [measurement(), measurement({ key: 'temperature', label: 'Temperature' }),
+      measurement({ key: 'custom_key', label: 'Custom key' })];
+    expect(activeProblems(plant, shown, {})).to.deep.equal([
       { key: 'moisture', label: 'Moisture', status: 'low' },
       { key: 'temperature', label: 'Temperature', status: 'high' },
       { key: 'custom_key', label: 'Custom key', status: 'problem' },
     ]);
-    expect(activeProblems(plant, [], { problem_source: 'plant', problem_sensors: ['temperature'] })).to.deep.equal([
-      { key: 'temperature', label: 'Temperature', status: 'high' },
-    ]);
-    expect(activeProblems(plant, [], { problem_source: 'plant', problem_sensors: [] })).to.deep.equal([
-      { key: 'moisture', label: 'Moisture', status: 'low' },
-      { key: 'temperature', label: 'Temperature', status: 'high' },
-      { key: 'custom_key', label: 'Custom key', status: 'problem' },
-    ]);
-    expect(activeProblems({ state: 'ok', attributes: { problems: [{ sensor_type: 'vpd' }] } }, [], {})).to.deep.equal([
+    expect(activeProblems(plant, [], {})).to.deep.equal([]);
+    expect(activeProblems({ state: 'ok', attributes: { problems: [{ sensor_type: 'vpd' }] } },
+      [measurement({ key: 'vpd', label: 'VPD' })], {})).to.deep.equal([
       { key: 'vpd', label: 'VPD', status: 'problem' },
     ]);
   });
 
-  it('uses only low/high gauges, filters allowed keys, and deduplicates', () => {
+  it('uses only low/high measurements for range triggers and deduplicates', () => {
     const measurements = [measurement(), measurement({ status: 'high' }),
       measurement({ key: 'temperature', label: 'Temperature', status: 'high' }),
       measurement({ key: 'humidity', status: 'ok' }), measurement({ key: 'dli', status: 'unknown' })];
-    expect(activeProblems(plant, measurements, { problem_source: 'gauges' })).to.deep.equal([
+    const metrics = ['moisture', 'temperature', 'humidity', 'dli'].map(type => ({
+      type, problem_trigger: 'out_of_range' as const,
+    }));
+    expect(activeProblems(plant, measurements, { metrics })).to.deep.equal([
       { key: 'moisture', label: 'Moisture', status: 'low' },
       { key: 'temperature', label: 'Temperature', status: 'high' },
     ]);
-    expect(activeProblems(undefined, measurements, { problem_source: 'gauges', problem_sensors: ['temperature'] })).to.deep.equal([
-      { key: 'temperature', label: 'Temperature', status: 'high' },
-    ]);
-    expect(activeProblems(plant, measurements, { problem_source: 'gauges', problem_sensors: [] })).to.deep.equal([
-      { key: 'moisture', label: 'Moisture', status: 'low' },
+    expect(activeProblems(undefined, measurements, { metrics: [
+      { type: 'moisture', problem_trigger: 'never' }, { type: 'temperature', problem_trigger: 'high' },
+    ] })).to.deep.equal([
       { key: 'temperature', label: 'Temperature', status: 'high' },
     ]);
   });
@@ -324,8 +319,12 @@ describe('activeProblems', () => {
     expect(activeProblems(undefined, [], {})).to.deep.equal([]);
     expect(activeProblems({ state: 'problem', attributes: { problems: [] } }, [], {})).to.deep.equal([]);
     expect(activeProblems({ state: 'problem', attributes: { problems: [null, {}] } }, [], {})).to.deep.equal([]);
-    expect(activeProblems(plant, [], { problem_sensors: ['co2'] })).to.deep.equal([]);
-    expect(activeProblems({ state: 'problem', attributes: {} }, [], { problem_source: 'gauges' })).to.deep.equal([]);
+    expect(activeProblems({ state: 'problem', attributes: {} }, [measurement()], {
+      metrics: [{ type: 'moisture', problem_trigger: 'low' }],
+    })).to.deep.equal([{ key: 'moisture', label: 'Moisture', status: 'low' }]);
+    expect(activeProblems({ state: 'problem', attributes: {} }, [measurement()], {
+      metrics: [{ type: 'moisture', problem_trigger: 'never' }],
+    })).to.deep.equal([{ key: 'plant', label: 'Needs attention', status: 'problem' }]);
   });
 });
 

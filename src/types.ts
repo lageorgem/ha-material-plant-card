@@ -25,6 +25,7 @@ export type HistoryPeriod = 'today' | '24h' | '3d' | '7d' | '14d' | '30d';
 export type ProblemTrigger = 'plant' | 'out_of_range' | 'low' | 'high' | 'never';
 export type FullDisplay = 'summary' | 'graph';
 export interface MetricConfig {
+  type: MeasurementKey | string;
   icon?: string;
   problem_trigger?: ProblemTrigger;
   period?: HistoryPeriod;
@@ -44,17 +45,12 @@ export interface MaterialPlantCardConfig {
   hide_species?: boolean;
   hide_image?: boolean;
   hide_units?: boolean;
-  hide_history?: boolean;
-  // Full-mode range window; defaults to 'today'. Cumulative metrics use daily maxima.
-  history_period?: HistoryPeriod;
-  metrics?: Partial<Record<string, MetricConfig>>;
-  full_display?: FullDisplay;
+  // Ordered metrics to show, with per-metric settings.
+  metrics?: MetricConfig[];
   image?: string;
   battery_sensor?: string;
   // Battery turns red below this level; defaults to 10.
   battery_warn_level?: number;
-  problem_source?: 'plant' | 'gauges';
-  problem_sensors?: string[];
   // Accepted for flower-card configuration compatibility; ignored by this card.
   battery_ok_level?: number;
   bars_per_row?: number;

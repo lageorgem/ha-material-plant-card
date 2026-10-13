@@ -1,9 +1,44 @@
 import { expect } from '@open-wc/testing';
-import { PERIOD_MS, periodStart, resolveMetric } from '../../src/calc/metric-settings';
+import { normalizeMetrics, PERIOD_MS, periodStart, resolveMetric } from '../../src/calc/metric-settings';
+import { DEFAULT_GAUGES } from '../../src/types';
 import type { MaterialPlantCardConfig, MetricConfig } from '../../src/types';
 
 const config = (overrides: Partial<MaterialPlantCardConfig> = {}): MaterialPlantCardConfig => ({
   type: 'custom:material-plant-card', entity: 'plant.test', ...overrides,
+});
+
+describe('normalizeMetrics', () => {
+  it('keeps ordered valid entries, unknown types, and the first duplicate with its settings', () => {
+    const first = { type: 'moisture', icon: 'mdi:water', days: 12 };
+    const metrics = [null, false, 42, 'dli', [], {}, { type: '' }, { type: 1 },
+      first, { type: 'custom_key' }, { type: 'moisture', days: 2 }, { type: 'dli' }];
+    expect(normalizeMetrics(config({ metrics } as unknown as Partial<MaterialPlantCardConfig>)))
+      .to.deep.equal([first, { type: 'custom_key' }, { type: 'dli' }]);
+  });
+
+  it('uses an explicit array even when empty or entirely invalid instead of show_bars', () => {
+    expect(normalizeMetrics(config({ metrics: [], show_bars: ['dli'] }))).to.deep.equal([]);
+    expect(normalizeMetrics(config({ metrics: [null, {}], show_bars: ['dli'] } as unknown as
+      Partial<MaterialPlantCardConfig>))).to.deep.equal([]);
+  });
+
+  it('falls back to ordered deduplicated show_bars strings when metrics is not an array', () => {
+    for (const metrics of [undefined, null, {}, 'invalid']) {
+      expect(normalizeMetrics(config({ metrics, show_bars: ['dli', 'custom', 'dli', 42, null] } as unknown as
+        Partial<MaterialPlantCardConfig>))).to.deep.equal([{ type: 'dli' }, { type: 'custom' }]);
+    }
+    expect(normalizeMetrics(config({ show_bars: [] }))).to.deep.equal([]);
+  });
+
+  it('maps defaults when neither field is an array and returns independently editable entries', () => {
+    for (const show_bars of [undefined, null, {}, 'dli']) {
+      expect(normalizeMetrics(config({ show_bars } as unknown as Partial<MaterialPlantCardConfig>)))
+        .to.deep.equal(DEFAULT_GAUGES.map(type => ({ type })));
+    }
+    const metrics = normalizeMetrics(config());
+    metrics[0].icon = 'mdi:custom';
+    expect(normalizeMetrics(config())[0].icon).to.equal(undefined);
+  });
 });
 
 describe('resolveMetric', () => {
@@ -11,81 +46,61 @@ describe('resolveMetric', () => {
     expect(PERIOD_MS).to.deep.equal({
       today: 86400000, '24h': 86400000, '3d': 259200000, '7d': 604800000, '14d': 1209600000, '30d': 2592000000,
     });
-    expect(resolveMetric(config(), 'custom')).to.deep.equal({
+    expect(resolveMetric({ type: 'custom' })).to.deep.equal({
       icon: undefined, period: 'today', periodMs: 86400000, days: 7, trigger: 'plant',
       display: 'summary', daylightOnly: false, daylightOffset: 30,
     });
-    expect(resolveMetric(config(), 'illuminance').daylightOnly).to.equal(true);
+    expect(resolveMetric({ type: 'illuminance' }).daylightOnly).to.equal(true);
   });
 
-  it('inherits valid global settings and overrides every metric setting independently', () => {
-    const cfg = config({ history_period: '3d', full_display: 'graph', metrics: {
-      illuminance: { icon: 'mdi:sun', period: '14d', days: 12.6, problem_trigger: 'high',
-        display: 'summary', daylight_only: false, daylight_offset: 45.6 },
-    } });
-    expect(resolveMetric(cfg, 'illuminance')).to.deep.equal({
+  it('overrides every metric setting independently', () => {
+    expect(resolveMetric({ type: 'illuminance', icon: 'mdi:sun', period: '14d', days: 12.6,
+      problem_trigger: 'high', display: 'summary', daylight_only: false, daylight_offset: 45.6 })).to.deep.equal({
       icon: 'mdi:sun', period: '14d', periodMs: PERIOD_MS['14d'], days: 13, trigger: 'high',
       display: 'summary', daylightOnly: false, daylightOffset: 46,
     });
-    expect(resolveMetric(cfg, 'moisture')).to.include({ period: '3d', display: 'graph', days: 7 });
     for (const period of ['today', '24h', '3d', '7d', '14d', '30d'] as const) {
-      expect(resolveMetric(config({ metrics: { moisture: { period } } }), 'moisture'))
+      expect(resolveMetric({ type: 'moisture', period }))
         .to.include({ period, periodMs: PERIOD_MS[period] });
-      expect(resolveMetric(config({ history_period: period }), 'moisture').period).to.equal(period);
     }
     for (const problem_trigger of ['plant', 'out_of_range', 'low', 'high', 'never'] as const) {
-      expect(resolveMetric(config({ metrics: { moisture: { problem_trigger } } }), 'moisture').trigger)
+      expect(resolveMetric({ type: 'moisture', problem_trigger }).trigger)
         .to.equal(problem_trigger);
     }
-  });
-
-  it('preserves source and sensor defaults but explicit triggers override both', () => {
-    expect(resolveMetric(config({ problem_source: 'gauges' }), 'moisture').trigger).to.equal('out_of_range');
-    expect(resolveMetric(config({ problem_sensors: ['temperature'] }), 'moisture').trigger).to.equal('never');
-    expect(resolveMetric(config({ problem_source: 'gauges', problem_sensors: ['temperature'] }), 'moisture').trigger)
-      .to.equal('never');
-    expect(resolveMetric(config({ problem_sensors: [] }), 'moisture').trigger).to.equal('plant');
-    expect(resolveMetric(config({ problem_source: 'gauges', problem_sensors: ['moisture'] }), 'moisture').trigger)
-      .to.equal('out_of_range');
-    expect(resolveMetric(config({ problem_sensors: ['temperature'], metrics: {
-      moisture: { problem_trigger: 'low' },
-    } }), 'moisture').trigger).to.equal('low');
+    expect(resolveMetric({ type: 'moisture', display: 'graph' }).display).to.equal('graph');
   });
 
   it('falls back from invalid runtime values rather than coercing them', () => {
     for (const invalid of [null, '', false, {}, NaN, Infinity, 'invalid']) {
-      const metric = { icon: invalid, period: invalid, days: invalid, problem_trigger: invalid,
+      const metric = { type: 'illuminance', icon: invalid, period: invalid, days: invalid, problem_trigger: invalid,
         display: invalid, daylight_only: invalid, daylight_offset: invalid } as unknown as MetricConfig;
-      const resolved = resolveMetric(config({ history_period: '7d', full_display: 'graph',
-        problem_source: 'gauges', metrics: { illuminance: metric } }), 'illuminance');
+      const resolved = resolveMetric(metric);
       expect(resolved).to.deep.equal({ icon: typeof invalid === 'string' && invalid.length > 0 ? invalid : undefined,
-        period: '7d', periodMs: PERIOD_MS['7d'], days: 7, trigger: 'out_of_range', display: 'graph',
+        period: 'today', periodMs: PERIOD_MS.today, days: 7, trigger: 'plant', display: 'summary',
         // `false` is a valid daylight_only value, not an invalid one.
         daylightOnly: invalid !== false, daylightOffset: 30 });
     }
-    const cfg = config({ history_period: 'bad', full_display: 'bad' } as unknown as Partial<MaterialPlantCardConfig>);
-    expect(resolveMetric(cfg, 'moisture')).to.include({ period: 'today', display: 'summary' });
-    const strings = { days: '15', daylight_offset: '60' } as unknown as MetricConfig;
-    expect(resolveMetric(config({ metrics: { moisture: strings } }), 'moisture'))
+    const strings = { type: 'moisture', days: '15', daylight_offset: '60' } as unknown as MetricConfig;
+    expect(resolveMetric(strings))
       .to.include({ days: 7, daylightOffset: 30 });
   });
 
   it('rounds and clamps finite days and offsets', () => {
     for (const [days, expected] of [[-10, 1], [0, 1], [1, 1], [7.4, 7], [7.5, 8], [30, 30], [100, 30]]) {
-      expect(resolveMetric(config({ metrics: { dli: { days } } }), 'dli').days).to.equal(expected);
+      expect(resolveMetric({ type: 'dli', days }).days).to.equal(expected);
     }
     for (const [daylight_offset, expected] of [[-10, 0], [0, 0], [30.4, 30], [30.5, 31], [180, 180], [200, 180]]) {
-      expect(resolveMetric(config({ metrics: { illuminance: { daylight_offset } } }), 'illuminance').daylightOffset)
+      expect(resolveMetric({ type: 'illuminance', daylight_offset }).daylightOffset)
         .to.equal(expected);
     }
   });
 
   it('enables daylight filtering only for illuminance', () => {
     for (const key of ['moisture', 'dli', 'custom']) {
-      expect(resolveMetric(config({ metrics: { [key]: { daylight_only: true } } }), key).daylightOnly).to.equal(false);
+      expect(resolveMetric({ type: key, daylight_only: true }).daylightOnly).to.equal(false);
     }
     for (const daylight_only of [true, false]) {
-      expect(resolveMetric(config({ metrics: { illuminance: { daylight_only } } }), 'illuminance').daylightOnly)
+      expect(resolveMetric({ type: 'illuminance', daylight_only }).daylightOnly)
         .to.equal(daylight_only);
     }
   });

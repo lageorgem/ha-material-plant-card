@@ -1,5 +1,5 @@
 import { DEFAULT_ICONS, MEASUREMENT_LABELS } from '../types';
-import { resolveMetric } from './metric-settings';
+import { normalizeMetrics, resolveMetric } from './metric-settings';
 import type {
   BatteryInfo, GaugeStatus, GaugeTone, MaterialPlantCardConfig, Measurement,
   MeasurementKey, PlantInfo, Problem,
@@ -130,6 +130,7 @@ export function activeProblems(
 ): Problem[] {
   const problems: Problem[] = [];
   const seen = new Set<string>();
+  const metrics = normalizeMetrics(config);
   const entries = plant?.attributes.problems;
   const plantProblems = new Map<string, Problem>();
   if (Array.isArray(entries)) {
@@ -145,7 +146,7 @@ export function activeProblems(
   }
   for (const m of measurements) {
     if (seen.has(m.key)) continue;
-    const trigger = resolveMetric(config, m.key).trigger;
+    const trigger = resolveMetric(metrics.find(metric => metric.type === m.key) ?? { type: m.key }).trigger;
     if (trigger === 'plant') {
       const problem = plantProblems.get(m.key);
       if (!problem) continue;
@@ -157,13 +158,7 @@ export function activeProblems(
     }
     seen.add(m.key);
   }
-  const shown = new Set(measurements.map(m => m.key));
-  for (const [key, problem] of plantProblems) {
-    if (shown.has(key) || seen.has(key) || resolveMetric(config, key).trigger !== 'plant') continue;
-    problems.push(problem);
-    seen.add(key);
-  }
-  if (!Array.isArray(entries) && plant?.state === 'problem' && config.problem_source !== 'gauges' && !seen.has('plant')) {
+  if (!Array.isArray(entries) && plant?.state === 'problem' && problems.length === 0) {
     problems.push({ key: 'plant', label: 'Needs attention', status: 'problem' });
   }
   return problems;
