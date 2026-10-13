@@ -357,7 +357,7 @@ function t(t,e,i,s){var o,r=arguments.length,n=r<3?e:null===s?s=Object.getOwnPro
           fill="var(--mpl-range-bar-ring, var(--mpl-surface-container-high))"
           stroke=${d} stroke-width="2"></circle>`:K}
         ${c?W`
-          <line class="hover-guide" x1=${this._x(c.t)} x2=${this._x(c.t)} y1=${14} y2=${oe}
+          <line class="hover-guide" x1=${this._x(c.t)} x2=${this._x(c.t)} y1="0" y2=${oe}
             stroke="var(--mpl-on-surface-variant)" stroke-width="1" opacity="0.4"></line>
           <circle class="hover-dot" cx=${this._x(c.t)} cy=${s(c.f)} r="3" fill=${((t,e,i)=>null!==e&&t<e||null!==i&&t>i?"var(--mpl-error)":"var(--mpl-success)")(c.f,l,h)}></circle>
         `:K}
@@ -665,7 +665,7 @@ function t(t,e,i,s){var o,r=arguments.length,n=r<3?e:null===s?s=Object.getOwnPro
     .placeholder { display: grid; place-items: center; background: var(--mpl-secondary-container); color: var(--mpl-on-secondary-container); }
     .problem-badge { position: absolute; bottom: 0; right: 0; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--mpl-shape-full); background: var(--mpl-error); box-shadow: 0 0 0 2px var(--mpl-surface-bg); }
     .problem-badge svg { display: block; width: 18px; height: 18px; fill: var(--mpl-on-error); }
-    .text-btn { min-width: 0; min-height: 44px; text-align: left; border-radius: 12px; }
+    .text-btn { min-width: 0; min-height: 44px; padding: 6px 12px; margin: -6px 0 -6px -12px; text-align: left; border-radius: 12px; }
     .name, .subtitle { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .name { font-size: 16px; font-weight: 500; line-height: 24px; color: var(--mpl-on-surface); }
     .subtitle { font-size: 14px; line-height: 20px; color: var(--mpl-on-surface-variant); }
@@ -679,13 +679,16 @@ function t(t,e,i,s){var o,r=arguments.length,n=r<3?e:null===s?s=Object.getOwnPro
     .gauge-btn { -webkit-touch-callout: none; user-select: none; touch-action: manipulation; }
     .gauge-btn:active, .text-btn:active { background: color-mix(in srgb, var(--mpl-on-surface) 12%, transparent); }
     .tiles { display: flex; flex-direction: column; gap: var(--mpl-tile-gap); margin-top: var(--mpl-tile-margin); }
-    .tile { box-sizing: border-box; width: 100%; text-align: left; cursor: pointer; padding: var(--mpl-tile-padding); background: var(--mpl-surface-container-high); border-radius: var(--mpl-tile-corner); --mpl-range-bar-ring: var(--mpl-surface-container-high); }
+    .tile { position: relative; box-sizing: border-box; width: 100%; text-align: left; cursor: pointer; padding: var(--mpl-tile-padding); background: var(--mpl-surface-container-high); border-radius: var(--mpl-tile-corner); --mpl-range-bar-ring: var(--mpl-surface-container-high); }
+    .tile::after { content: ''; position: absolute; inset: 0; border-radius: inherit; background: var(--mpl-on-surface); opacity: 0; pointer-events: none; transition: opacity 150ms; }
     .tile.problem { background: linear-gradient(to right, var(--mpl-surface-container-high) 45%, color-mix(in srgb, var(--mpl-error-container) 40%, var(--mpl-surface-container-high))); }
     .tile:first-child { border-top-left-radius: var(--mpl-tile-outer-corner); border-top-right-radius: var(--mpl-tile-outer-corner); }
     .tile:last-child { border-bottom-left-radius: var(--mpl-tile-outer-corner); border-bottom-right-radius: var(--mpl-tile-outer-corner); }
     /* Touch can leave a sticky :hover after scrubbing; only hover-capable inputs get this layer. */
     @media (hover: hover) {
-      .tile:hover:not(.graph-active) { background-color: color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-container-high)); }
+      .tile:hover:not(.graph-active)::after { opacity: 0.08; }
     }
+    .tile:active:not(.graph-active)::after { opacity: 0.12; }
+    @media (prefers-reduced-motion: reduce) { .tile::after { transition: none; } }
     .warning { color: var(--mpl-error); }
   `],t([mt({attribute:!1,noAccessor:!0})],ue.prototype,"hass",null),t([gt()],ue.prototype,"_config",void 0),t([gt()],ue.prototype,"_info",void 0),t([gt()],ue.prototype,"_failedSrc",void 0),t([gt()],ue.prototype,"_gaugeCapacity",void 0),t([gt()],ue.prototype,"_statsMap",void 0),t([gt()],ue.prototype,"_tooltip",void 0),t([gt()],ue.prototype,"_tooltipSource",void 0),customElements.get(vt)||customElements.define(vt,ue);const me=window;me.customCards??=[],me.customCards.some(t=>t.type===vt)||me.customCards.push({type:vt,name:ft,description:"A Material 3 Expressive plant card with circular range gauges, problem states and a battery indicator.",preview:!0,documentationURL:"https://github.com/lageorgem/ha-material-plant-card"}),console.info(`${ft} v0.1.0`);export{ue as MaterialPlantCard};
