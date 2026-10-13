@@ -702,7 +702,7 @@ export class MaterialPlantCard extends LitElement {
     .placeholder { display: grid; place-items: center; background: var(--mpl-secondary-container); color: var(--mpl-on-secondary-container); }
     .problem-badge { position: absolute; bottom: 0; right: 0; display: grid; place-items: center; width: 18px; height: 18px; border-radius: var(--mpl-shape-full); background: var(--mpl-error); box-shadow: 0 0 0 2px var(--mpl-surface-bg); }
     .problem-badge svg { display: block; width: 18px; height: 18px; fill: var(--mpl-on-error); }
-    .text-btn { min-width: 0; min-height: 44px; padding: 6px 12px; margin: -6px 0 -6px -12px; text-align: left; border-radius: 12px; }
+    .text-btn { min-width: 0; min-height: 44px; padding: 6px 6px; margin: -6px -6px -6px -6px; text-align: left; border-radius: 12px; }
     .name, .subtitle { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .name { font-size: 16px; font-weight: 500; line-height: 24px; color: var(--mpl-on-surface); }
     .subtitle { font-size: 14px; line-height: 20px; color: var(--mpl-on-surface-variant); }

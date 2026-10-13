@@ -74,21 +74,24 @@ describe('material-plant-card', () => {
 
   for (const hideImage of [false, true]) {
     it(`pads the header state layer without moving text or escaping the card (hide_image=${hideImage})`, async () => {
-      const card = await mount(cfg({ hide_image: hideImage }));
+      const card = await mount(cfg({ hide_image: hideImage, battery_sensor: BATTERY }));
       card.style.width = '327px';
       await settleLayout(card);
       const button = query(card, '.text-btn');
       const style = getComputedStyle(button);
       expect(style.paddingTop).to.equal('6px');
       expect(style.paddingBottom).to.equal('6px');
-      expect(style.paddingLeft).to.equal('12px');
-      expect(style.paddingRight).to.equal('12px');
+      expect(style.paddingLeft).to.equal('6px');
+      expect(style.paddingRight).to.equal('6px');
       const surface = query(card, 'ha-card').getBoundingClientRect();
       const name = query(card, '.name').getBoundingClientRect();
       const expectedLeft = hideImage ? surface.left + 16 : query(card, '.image-btn').getBoundingClientRect().right + 12;
       expect(name.left).to.be.closeTo(expectedLeft, 0.5);
-      expect(button.getBoundingClientRect().left).to.be.at.least(surface.left);
-      expect(button.getBoundingClientRect().right).to.be.at.most(surface.right);
+      const buttonBox = button.getBoundingClientRect();
+      expect(buttonBox.left).to.be.closeTo(expectedLeft - 6, 0.5);
+      expect(buttonBox.right).to.be.closeTo(query(card, '.battery').getBoundingClientRect().left - 6, 0.5);
+      expect(buttonBox.left).to.be.at.least(surface.left);
+      expect(buttonBox.right).to.be.at.most(surface.right);
       expect(style.minWidth).to.equal('0px');
       expect(getComputedStyle(query(card, '.name')).textOverflow).to.equal('ellipsis');
       expect(query(card, '.header').getBoundingClientRect().height).to.equal(hideImage ? 44 : 56);
