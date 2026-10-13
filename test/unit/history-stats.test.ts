@@ -16,9 +16,10 @@ describe('fetchHistory', () => {
   const request: HistoryFetch = {
     hourly: ['sensor.shared', 'sensor.shared'], hourlyStart: at(10, 12),
     cumulative: ['sensor.shared', 'sensor.dli', 'sensor.dli'], cumulativeStart: at(7),
+    fine: ['sensor.shared', 'sensor.light', 'sensor.light'], fineStart: at(12, 6),
   };
 
-  it('sends exact deduplicated hourly requests in parallel and returns raw rows', async () => {
+  it('sends three exact deduplicated requests in parallel and returns raw rows', async () => {
     const messages: Record<string, unknown>[] = [];
     const resolvers: Array<(value: Record<string, HourRow[]>) => void> = [];
     const hass = {
@@ -36,30 +37,38 @@ describe('fetchHistory', () => {
       type: 'recorder/statistics_during_period',
       start_time: new Date(request.cumulativeStart).toISOString(), end_time: new Date(now).toISOString(),
       statistic_ids: ['sensor.shared', 'sensor.dli'], period: 'hour', types: ['state'],
+    }, {
+      type: 'recorder/statistics_during_period',
+      start_time: new Date(request.fineStart).toISOString(), end_time: new Date(now).toISOString(),
+      statistic_ids: ['sensor.shared', 'sensor.light'], period: '5minute', types: ['min', 'max', 'mean'],
     }]);
-    expect(resolvers).to.have.length(2);
+    expect(resolvers).to.have.length(3);
     const hourly = { 'sensor.shared': [row(at(12), { min: 1, max: 3, mean: 2 })] };
     const cumulative = { 'sensor.dli': [row(at(12, 23), { state: 9.1216 })] };
+    const fine = { 'sensor.light': [{ start: at(12, 6), end: at(12, 6, 5), min: 1, max: 3, mean: 2 }] };
+    resolvers[2](fine);
     resolvers[1](cumulative);
     resolvers[0](hourly);
-    expect(await pending).to.deep.equal({ hourly, cumulative,
-      failedGroups: { hourly: false, cumulative: false } });
+    expect(await pending).to.deep.equal({ hourly, cumulative, fine,
+      failedGroups: { hourly: false, cumulative: false, fine: false } });
     expect(request.hourly).to.have.length(2);
     expect(request.cumulative).to.have.length(3);
+    expect(request.fine).to.have.length(3);
   });
 
-  it('skips both empty lists', async () => {
+  it('skips all empty lists', async () => {
     let calls = 0;
     const hass = { callWS: async <T>(): Promise<T> => {
       calls++;
       throw new Error('Unexpected call');
     } };
-    expect(await fetchHistory(hass, { ...request, hourly: [], cumulative: [] }, now))
-      .to.deep.equal({ hourly: {}, cumulative: {}, failedGroups: { hourly: false, cumulative: false } });
+    expect(await fetchHistory(hass, { ...request, hourly: [], cumulative: [], fine: [] }, now))
+      .to.deep.equal({ hourly: {}, cumulative: {}, fine: {},
+        failedGroups: { hourly: false, cumulative: false, fine: false } });
     expect(calls).to.equal(0);
   });
 
-  for (const group of ['hourly', 'cumulative'] as const) {
+  for (const group of ['hourly', 'cumulative', 'fine'] as const) {
     it(`skips an empty ${group} list independently`, async () => {
       const messages: Record<string, unknown>[] = [];
       const hass = { callWS: async <T>(message: Record<string, unknown>): Promise<T> => {
@@ -67,8 +76,9 @@ describe('fetchHistory', () => {
         return {} as T;
       } };
       await fetchHistory(hass, { ...request, [group]: [] }, now);
-      expect(messages).to.have.length(1);
-      expect(messages[0].types).to.deep.equal(group === 'hourly' ? ['state'] : ['min', 'max', 'mean']);
+      expect(messages).to.have.length(2);
+      expect(messages.some(message => message.start_time === new Date(request[`${group}Start`]).toISOString()))
+        .to.equal(false);
     });
 
     it(`isolates ${group} rejection and preserves the other result`, async () => {
@@ -76,16 +86,18 @@ describe('fetchHistory', () => {
       let calls = 0;
       const hass = { callWS: async <T>(message: Record<string, unknown>): Promise<T> => {
         calls++;
-        const isHourly = (message.types as string[])[0] === 'min';
-        if (isHourly === (group === 'hourly')) throw new Error('Recorder unavailable');
+        const messageGroup = message.period === '5minute' ? 'fine' :
+          (message.types as string[])[0] === 'state' ? 'cumulative' : 'hourly';
+        if (messageGroup === group) throw new Error('Recorder unavailable');
         return response as T;
       } };
       expect(await fetchHistory(hass, request, now)).to.deep.equal({
         hourly: group === 'hourly' ? {} : response,
         cumulative: group === 'cumulative' ? {} : response,
-        failedGroups: { hourly: group === 'hourly', cumulative: group === 'cumulative' },
+        fine: group === 'fine' ? {} : response,
+        failedGroups: { hourly: group === 'hourly', cumulative: group === 'cumulative', fine: group === 'fine' },
       });
-      expect(calls).to.equal(2);
+      expect(calls).to.equal(3);
     });
   }
 
@@ -98,9 +110,9 @@ describe('fetchHistory', () => {
         return Promise.reject(new Error('Disconnected'));
       } };
       expect(await fetchHistory(hass, request, now)).to.deep.equal({
-        hourly: {}, cumulative: {}, failedGroups: { hourly: true, cumulative: true },
+        hourly: {}, cumulative: {}, fine: {}, failedGroups: { hourly: true, cumulative: true, fine: true },
       });
-      expect(calls).to.equal(2);
+      expect(calls).to.equal(3);
     }
   });
 });

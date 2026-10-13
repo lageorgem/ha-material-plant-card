@@ -27,12 +27,15 @@ export interface HistoryFetch {
   hourlyStart: number;
   cumulative: readonly string[];
   cumulativeStart: number;
+  fine: readonly string[];
+  fineStart: number;
 }
 
 export interface RawHistory {
   hourly: Record<string, HourRow[]>;
   cumulative: Record<string, HourRow[]>;
-  failedGroups: { hourly: boolean; cumulative: boolean };
+  fine: Record<string, HourRow[]>;
+  failedGroups: { hourly: boolean; cumulative: boolean; fine: boolean };
 }
 
 export function withCurrent(stats: Stats24h | null, value: number | null): Stats24h | null {
@@ -46,19 +49,19 @@ export async function fetchHistory(
   now = Date.now(),
 ): Promise<RawHistory> {
   const result: RawHistory = {
-    hourly: {}, cumulative: {}, failedGroups: { hourly: false, cumulative: false },
+    hourly: {}, cumulative: {}, fine: {}, failedGroups: { hourly: false, cumulative: false, fine: false },
   };
-  await Promise.all((['hourly', 'cumulative'] as const).map(async (group) => {
+  await Promise.all((['hourly', 'cumulative', 'fine'] as const).map(async (group) => {
     try {
       const ids = [...new Set(req[group])];
       if (ids.length === 0) return;
       result[group] = await hass.callWS<Record<string, HourRow[]>>({
         type: 'recorder/statistics_during_period',
-        start_time: new Date(group === 'hourly' ? req.hourlyStart : req.cumulativeStart).toISOString(),
+        start_time: new Date(req[`${group}Start`]).toISOString(),
         end_time: new Date(now).toISOString(),
         statistic_ids: ids,
-        period: 'hour',
-        types: group === 'hourly' ? ['min', 'max', 'mean'] : ['state'],
+        period: group === 'fine' ? '5minute' : 'hour',
+        types: group === 'cumulative' ? ['state'] : ['min', 'max', 'mean'],
       });
     } catch {
       result.failedGroups[group] = true;

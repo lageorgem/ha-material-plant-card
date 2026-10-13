@@ -90,13 +90,15 @@ export interface SunEvent {
 }
 
 /** Inclusive sunrise/sunset events across every overlapping solar day. */
-export function sunEvents(start: number, end: number, lat: number, lon: number): SunEvent[] {
+export function sunEvents(start: number, end: number, lat: number, lon: number, offsetMin = 0): SunEvent[] {
   const events: SunEvent[] = [];
+  const offset = offsetMin * MINUTE_MS;
   for (let at = start - DAY_MS; at <= end + DAY_MS; at += DAY_MS) {
     const day = sunTimes(at, lat, lon);
     if (typeof day === 'string') continue;
+    if (day.sunrise + offset >= day.sunset - offset) continue;
     for (const kind of ['sunrise', 'sunset'] as const) {
-      const t = day[kind];
+      const t = day[kind] + (kind === 'sunrise' ? offset : -offset);
       if (start <= t && t <= end) events.push({ t, kind });
     }
   }

@@ -78,6 +78,47 @@ describe('sunTimes', () => {
 });
 
 describe('sunEvents', () => {
+  for (const offset of [30, -30]) {
+    it(`shifts both event kinds by the ${offset}-minute daylight offset`, () => {
+      const start = at('2026-10-13T00:00:00Z');
+      const end = start + 3 * DAY;
+      const original = sunEvents(start, end, 44.43, 26.13);
+      const shifted = sunEvents(start, end, 44.43, 26.13, offset);
+      expect(shifted).to.deep.equal(original.map(event => ({
+        kind: event.kind, t: event.t + (event.kind === 'sunrise' ? 1 : -1) * offset * MINUTE,
+      })));
+      if (offset === 30) {
+        expect(Math.abs(shifted[1].t - at('2026-10-13T15:04:44Z'))).to.be.at.most(2 * MINUTE);
+      }
+      for (const event of shifted) {
+        expect(isDaylight(event.t, event.t, 44.43, 26.13, offset)).to.equal(true);
+        const inside = event.t + (event.kind === 'sunrise' ? 1 : -1);
+        const outside = event.t - (event.kind === 'sunrise' ? 1 : -1);
+        expect(isDaylight(inside, inside, 44.43, 26.13, offset)).to.equal(true);
+        expect(isDaylight(outside, outside, 44.43, 26.13, offset)).to.equal(false);
+      }
+    });
+  }
+
+  it('filters shifted instants inclusively rather than the original events', () => {
+    const day = normal(sunTimes(at('2026-10-13T10:00:00Z'), 44.43, 26.13));
+    const sunrise = day.sunrise + 30 * MINUTE;
+    const sunset = day.sunset - 30 * MINUTE;
+    expect(sunEvents(sunrise, sunset, 44.43, 26.13, 30)).to.deep.equal([
+      { t: sunrise, kind: 'sunrise' }, { t: sunset, kind: 'sunset' },
+    ]);
+    expect(sunEvents(sunrise + 1, sunset - 1, 44.43, 26.13, 30)).to.deep.equal([]);
+  });
+
+  it('omits days whose offset collapses or reverses the daylight window', () => {
+    const start = at('2026-10-13T00:00:00Z');
+    const day = normal(sunTimes(start + 12 * HOUR, 44.43, 26.13));
+    const halfDay = (day.sunset - day.sunrise) / (2 * MINUTE);
+    for (const offset of [halfDay, halfDay + 1, 24 * 60]) {
+      expect(sunEvents(start, start + DAY, 44.43, 26.13, offset)).to.deep.equal([]);
+    }
+  });
+
   it('returns the sunset and next sunrise in a 24-hour window, sorted', () => {
     const events = sunEvents(at('2026-10-13T12:00:00Z'), at('2026-10-14T12:00:00Z'), 44.43, 26.13);
     expect(events.map(event => event.kind)).to.deep.equal(['sunset', 'sunrise']);
