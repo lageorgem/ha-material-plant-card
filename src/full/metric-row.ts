@@ -1,6 +1,6 @@
 import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { property } from 'lit/decorators.js';
-import { describeMeasurement, formatValue, gaugeFraction, gaugeStatus } from '../calc/measurements';
+import { describeMeasurement, formatCaptionNumber, formatValue, gaugeFraction, gaugeStatus } from '../calc/measurements';
 import { graphScale } from '../calc/graph-scale';
 import type { MetricHistory, Stats24h } from '../data/history-stats';
 import type { FullDisplay, GaugeTone, Measurement } from '../types';
@@ -14,16 +14,7 @@ const displayUnits: Readonly<Record<string, string>> = {
   'mol/(d⋅m²)': 'mol/d',
 };
 
-/** Compact visual captions; accessible descriptions retain formatValue precision. */
-export function formatCaptionNumber(value: number): string {
-  const magnitude = Math.abs(value);
-  if (magnitude >= 1000) return formatValue(value, '', true);
-  const digits = magnitude >= 10 ? 0 : magnitude >= 0.1 ? 1 : 2;
-  // Match measurements' decimal-safe rounding, including negative ties.
-  const [coefficient, exponent = '0'] = String(magnitude).split('e');
-  const shifted = Number(`${coefficient}e${Number(exponent) + digits}`);
-  return String(Math.sign(value) * Math.round(shifted) / 10 ** digits);
-}
+export { formatCaptionNumber } from '../calc/measurements';
 
 /** Accessible tile description; the enclosing button owns the accessible name. */
 export function describeWithStats(m: Measurement, stats: Stats24h | null, period = 'last 24 h'): string {
@@ -64,7 +55,7 @@ export class MplMetricRow extends LitElement {
     };
     const graph = (): TemplateResult => {
       const series = this.history?.series ?? [];
-      const scale = graphScale(series.map(({ v }) => v), m.min, m.max, m.unit);
+      const scale = graphScale([...series.map(({ v }) => v), m.value], m.min, m.max);
       const last = series[series.length - 1];
       const explicitDomain = Number.isFinite(this.graphStart) && Number.isFinite(this.graphEnd);
       const end = explicitDomain ? this.graphEnd! : last?.t ?? Date.now();
@@ -87,7 +78,7 @@ export class MplMetricRow extends LitElement {
       };
       const currentFraction = scale.map(last?.v ?? null);
       return html`<mpl-history-graph
-        .points=${points} .start=${start} .end=${end}
+        .points=${points} .start=${start} .end=${end} .ticks=${scale.ticks}
         .thresholdLow=${scale.thresholdLow} .thresholdHigh=${scale.thresholdHigh} .events=${this.events}
         .minMarker=${marker(this.history?.minPoint ?? null)}
         .maxMarker=${marker(this.history?.maxPoint ?? null)}

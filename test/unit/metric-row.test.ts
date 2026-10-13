@@ -1,6 +1,7 @@
 import { expect, fixture, html } from '@open-wc/testing';
 import { describeWithStats, formatCaptionNumber, MplMetricRow } from '../../src/full/metric-row';
-import { describeMeasurement, formatValue, gaugeFraction } from '../../src/calc/measurements';
+import { describeMeasurement, formatCaptionNumber as measurementCaptionNumber, formatValue, gaugeFraction } from '../../src/calc/measurements';
+import { graphScale } from '../../src/calc/graph-scale';
 import type { GaugeTone, Measurement } from '../../src/types';
 import type { MetricHistory, Stats24h } from '../../src/data/history-stats';
 
@@ -292,6 +293,7 @@ describe('mpl-metric-row graph display', () => {
     maxMarker: { t: number; f: number; ok: boolean } | null;
     current: { t: number; f: number; tone: GaugeTone } | null;
     thresholdLow: number | null; thresholdHigh: number | null;
+    ticks: { f: number; label: string }[];
     events: { t: number; icon: string }[];
     summary: string;
   };
@@ -363,27 +365,17 @@ describe('mpl-metric-row graph display', () => {
       const maxPoint = { t: graphStart + 45 * 60000, v: 31 };
       const series = missingHourly ? [] : [{ t: graphStart + 30 * 60000, v: 22 }];
       const el = await graphRow(moisture, { stats, series, minPoint, maxPoint }, { graphStart, graphEnd });
-      el.style.width = '400px';
       el.events = [{ t: graphStart + hour, icon: 'mdi:weather-sunset-up' }];
       await el.updateComplete;
       const props = graph(el);
-      for (let frame = 0; frame < 3; frame++) {
-        await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-      }
-      const svg = props.shadowRoot!.querySelector('svg')!;
-      const width = Number(svg.getAttribute('width'));
-      expect(width).to.be.greaterThan(0);
+      const scale = graphScale([...series.map(p => p.v), moisture.value], moisture.min, moisture.max);
       expect(props.start).to.equal(graphStart);
       expect(props.end).to.equal(graphEnd);
-      for (const [selector, t] of [['.min-dot', minPoint.t], ['.max-dot', maxPoint.t]] as const) {
-        const x = Number(props.shadowRoot!.querySelector(selector)!.getAttribute('cx'));
-        expect(x).to.be.closeTo((t - graphStart) / (graphEnd - graphStart) * width, 1e-9);
-        expect(x).to.be.greaterThan(0);
-      }
-      expect(Number(props.shadowRoot!.querySelector('.event-line')!.getAttribute('x1'))).to.equal(width / 2);
-      if (!missingHourly) {
-        expect(Number(props.shadowRoot!.querySelector('.isolated-point')!.getAttribute('cx'))).to.equal(width / 4);
-      }
+      expect(props.minMarker).to.deep.equal({ t: minPoint.t, f: scale.map(minPoint.v), ok: false });
+      expect(props.maxMarker).to.deep.equal({ t: maxPoint.t, f: scale.map(maxPoint.v), ok: true });
+      expect(props.points.map(p => [p.t, p.f])).to.deep.equal(series.map(p => [p.t, scale.map(p.v)]));
+      expect(props.events).to.equal(el.events);
+      expect(props.ticks).to.deep.equal(scale.ticks);
       expect(props.summary).to.equal(describeWithStats(moisture, stats, 'today'));
     });
   }
@@ -406,13 +398,17 @@ describe('mpl-metric-row graph display', () => {
       el.periodText = 'daylight, last 3 days';
       await el.updateComplete;
       const props = graph(el);
-      const f = (v: number | null) => gaugeFraction(v, measurement.min, measurement.max, measurement.unit);
+      const scale = graphScale([...history.series.map(p => p.v), measurement.value], measurement.min, measurement.max);
+      const f = scale.map;
       expect(props.start).to.equal(start);
       expect(props.end).to.equal(start + 2 * hour);
       expect(props.points.map(p => [p.t, p.f])).to.deep.equal(history.series.map(p => [p.t, f(p.v)]));
       expect(props.minMarker).to.deep.equal({ t: start, f: f(12), ok: measurement.unit === 'lx' });
       expect(props.maxMarker).to.deep.equal({ t: start + 2 * hour, f: f(31), ok: true });
       expect(props.current).to.deep.equal({ t: start + 2 * hour, f: f(31), tone: 'problem' });
+      expect(props.ticks).to.deep.equal(scale.ticks);
+      expect(props.thresholdLow).to.equal(scale.thresholdLow);
+      expect(props.thresholdHigh).to.equal(scale.thresholdHigh);
       expect(props.summary).to.equal(describeWithStats(measurement, stats, el.periodText));
       el.tone = 'advisory';
       await el.updateComplete;
@@ -424,21 +420,19 @@ describe('mpl-metric-row graph display', () => {
   });
 
   for (const scenario of [
-    { name: 'below', values: [1, null, 2, 3], low: 0.92, high: null },
-    { name: 'above', values: [30, null, 35, 40], low: null, high: 0.08 },
-    { name: 'dipping into ideal', values: [1, null, 10, 30], low: 0.2, high: 0.8 },
+    { name: 'below', values: [1, null, 2, 3], low: 4.5, high: 14.5 },
+    { name: 'above', values: [35, null, 37, 40], low: -5, high: -1 },
+    { name: 'dipping into ideal', values: [1, null, 10, 30], low: 1 / 3, high: 1 },
   ]) {
     it(`uses the ${scenario.name} scale for DLI points, markers and current`, async () => {
-      const measurement: Measurement = { ...moisture, key: 'dli', unit: 'mol/d⋅m²', min: 10, max: 30, value: 999 };
+      const measurement: Measurement = { ...moisture, key: 'dli', unit: 'mol/d⋅m²', min: 10, max: 30, value: scenario.values[3]! };
       const series = scenario.values.map((v, index) => ({ t: start + index * hour, v }));
       const minPoint = { t: series[0].t, v: scenario.values[0]! };
       const maxPoint = { t: series[3].t, v: scenario.values[3]! };
       const el = await graphRow(measurement, { stats: null, series, minPoint, maxPoint });
       const props = graph(el);
-      const fraction = (v: number | null) => v === null ? null : scenario.name === 'below'
-        ? 0.08 + 0.84 * (v - 1) / (10 - 1)
-        : scenario.name === 'above' ? 0.08 + 0.84 * (v - 30) / (40 - 30)
-          : gaugeFraction(v, 10, 30, measurement.unit);
+      const scale = graphScale([...scenario.values, measurement.value], 10, 30);
+      const fraction = scale.map;
       for (const [index, point] of props.points.entries()) {
         const expected = fraction(series[index].v);
         if (expected === null) expect(point.f).to.equal(null);
@@ -446,6 +440,7 @@ describe('mpl-metric-row graph display', () => {
       }
       expect(props.thresholdLow).to.equal(scenario.low);
       expect(props.thresholdHigh).to.equal(scenario.high);
+      expect(props.ticks).to.deep.equal(scale.ticks);
       expect(props.minMarker!.f).to.be.closeTo(fraction(minPoint.v)!, 1e-12);
       expect(props.maxMarker!.f).to.be.closeTo(fraction(maxPoint.v)!, 1e-12);
       expect(props.current!.f).to.be.closeTo(fraction(maxPoint.v)!, 1e-12);
@@ -454,6 +449,33 @@ describe('mpl-metric-row graph display', () => {
       expect(props.maxMarker!.ok).to.equal(maxPoint.v >= 10 && maxPoint.v <= 30);
     });
   }
+
+  it('zooms into observed temperatures with labelled boundary ticks', async () => {
+    const series = [{ t: start, v: 20.1 }, { t: start + hour, v: null }, { t: start + 2 * hour, v: 22.4 }];
+    const measurement = { ...moisture, unit: '°C', value: 21, min: 15, max: 30 };
+    const el = await graphRow(measurement, {
+      stats: null, series, minPoint: { t: start, v: 20.1 }, maxPoint: { t: start + 2 * hour, v: 22.4 },
+    });
+    const props = graph(el);
+    expect(props.points.map(p => p.f)).to.deep.equal([(20.1 - 20) / 4, null, (22.4 - 20) / 4]);
+    for (const point of props.points) if (point.f !== null) expect(point.f).to.be.within(0, 1);
+    expect(props.ticks[0]).to.deep.equal({ f: 0, label: '20' });
+    expect(props.ticks[props.ticks.length - 1]).to.deep.equal({ f: 1, label: '24' });
+    expect(props.thresholdLow).to.equal(-1.25);
+    expect(props.thresholdHigh).to.equal(2.5);
+  });
+
+  it('includes the current measurement in the domain even outside the series', async () => {
+    const series = [{ t: start, v: 20.1 }, { t: start + hour, v: 22.4 }];
+    const measurement = { ...moisture, value: 40 };
+    const el = await graphRow(measurement, { stats: null, series, minPoint: null, maxPoint: null });
+    const props = graph(el);
+    const scale = graphScale([20.1, 22.4, 40], measurement.min, measurement.max);
+    expect(props.points.map(p => p.f)).to.deep.equal(series.map(p => scale.map(p.v)));
+    expect(props.ticks).to.deep.equal(scale.ticks);
+    expect(props.ticks[props.ticks.length - 1]).to.deep.equal({ f: 1, label: '40' });
+    expect(props.current).to.deep.equal({ t: start + hour, f: scale.map(22.4), tone: 'problem' });
+  });
 
   it('defaults events to empty and passes the supplied array straight through reactively', async () => {
     const el = await graphRow();
@@ -527,15 +549,38 @@ describe('mpl-metric-row graph display', () => {
       expect(props.summary).to.equal(describeMeasurement(moisture));
       expect(el.getBoundingClientRect().height).to.equal(84);
     }
-    const el = await graphRow({ ...moisture, min: null });
+    const el = await graphRow({ ...moisture, value: null }, {
+      stats: null, series: [{ t: start, v: null }],
+      minPoint: { t: start, v: NaN }, maxPoint: { t: start, v: Infinity },
+    });
     expect(graph(el).points.every(p => p.f === null)).to.equal(true);
+    expect(graph(el).ticks).to.deep.equal([]);
+    expect(graph(el).thresholdLow).to.equal(null);
+    expect(graph(el).thresholdHigh).to.equal(null);
     expect(graph(el).minMarker).to.equal(null);
     expect(graph(el).maxMarker).to.equal(null);
     expect(graph(el).current).to.equal(null);
   });
+
+  it('maps observed values without ideal bounds and passes null thresholds', async () => {
+    const measurement = { ...moisture, min: null };
+    const el = await graphRow(measurement);
+    const props = graph(el);
+    const scale = graphScale([...history.series.map(p => p.v), measurement.value], null, measurement.max);
+    expect(props.points.map(p => p.f)).to.deep.equal(history.series.map(p => scale.map(p.v)));
+    expect(props.minMarker!.f).to.equal(scale.map(12));
+    expect(props.maxMarker!.f).to.equal(scale.map(31));
+    expect(props.current!.f).to.equal(scale.map(31));
+    expect(props.ticks).to.deep.equal(scale.ticks);
+    expect(props.thresholdLow).to.equal(null);
+    expect(props.thresholdHigh).to.equal(null);
+  });
 });
 
 describe('formatCaptionNumber', () => {
+  it('re-exports the measurements formatter for existing importers', () => {
+    expect(formatCaptionNumber).to.equal(measurementCaptionNumber);
+  });
   it('uses magnitude-based precision with decimal-safe rounding and no trailing zeros', () => {
     for (const [value, expected] of [
       [53.4, '53'], [62.5, '63'], [1.37, '1.4'], [0.04, '0.04'],
