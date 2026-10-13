@@ -6,6 +6,7 @@ import { DEFAULT_GAUGES, type MaterialPlantCardConfig, type PlantInfo } from '..
 import { configForm } from '../../src/config-form';
 import { describeWithStats, type MplMetricRow } from '../../src/full/metric-row';
 import { localDayStart } from '../../src/data/history-stats';
+import { sunEvents } from '../../src/calc/sun';
 
 const ENTITY = 'plant.test';
 const BATTERY = 'sensor.battery';
@@ -83,6 +84,58 @@ describe('material-plant-card', () => {
       hass.states['sensor.illuminance'] = state(value);
       return hass;
     };
+
+    it('passes sunrise and sunset icons for 24h illuminance independently of daylight filtering', async () => {
+      clockForStats();
+      const hass = illuminanceHass();
+      const config = full({ show_bars: ['illuminance'], full_display: 'graph', history_period: '24h' });
+      const card = await mount(config, hass);
+      const expected = sunEvents(Date.now() - 86400000, Date.now(), hass.config.latitude, hass.config.longitude)
+        .map(event => ({ t: event.t, icon: event.kind === 'sunrise' ? 'mdi:weather-sunset-up' : 'mdi:weather-sunset-down' }));
+      expect(expected).to.have.length(2);
+      expect(expected.map(event => event.icon)).to.have.members(['mdi:weather-sunset-up', 'mdi:weather-sunset-down']);
+      expect(rows(card)[0].events).to.deep.equal(expected);
+      await rows(card)[0].updateComplete;
+      expect(rows(card)[0].shadowRoot!.querySelector('mpl-history-graph')!.events).to.deep.equal(expected);
+      card.setConfig({ ...config, metrics: { illuminance: { daylight_only: false } } });
+      await settle(card);
+      expect(rows(card)[0].events).to.deep.equal(expected);
+      card.setConfig({ ...config, history_period: '3d' });
+      await settle(card);
+      expect(rows(card)[0].events).to.have.length(6);
+      card.setConfig({ ...config, history_period: '7d' });
+      await settle(card);
+      expect(rows(card)[0].events).to.deep.equal([]);
+      card.remove();
+    });
+
+    it('omits solar events without finite coordinates and restores them when coordinates return', async () => {
+      clockForStats();
+      const hass = illuminanceHass();
+      const card = await mount(full({ show_bars: ['illuminance'], full_display: 'graph' }), hass);
+      for (const config of [
+        { time_zone: undefined },
+        { ...hass.config, latitude: NaN },
+        { ...hass.config, longitude: Infinity },
+      ]) {
+        card.hass = { ...hass, config } as unknown as HomeAssistant;
+        await settle(card);
+        expect(rows(card)[0].events).to.deep.equal([]);
+      }
+      assign(card, hass);
+      await settle(card);
+      expect(rows(card)[0].events).to.have.length(2);
+      card.remove();
+    });
+
+    it('omits solar events for non-illuminance and cumulative illuminance graphs', async () => {
+      clockForStats();
+      const hass = illuminanceHass();
+      hass.states['sensor.illuminance'] = state('0', { state_class: 'total_increasing' });
+      const card = await mount(full({ show_bars: ['moisture', 'illuminance'], full_display: 'graph' }), hass);
+      expect(rows(card).map(row => row.events)).to.deep.equal([[], []]);
+      card.remove();
+    });
 
     for (const compact of [false, true]) {
       it(`applies per-metric icons and problem triggers in ${compact ? 'compact' : 'full'} mode`, async () => {

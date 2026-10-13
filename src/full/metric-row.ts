@@ -1,6 +1,7 @@
 import { LitElement, html, css, nothing, type TemplateResult } from 'lit';
 import { property } from 'lit/decorators.js';
 import { describeMeasurement, formatValue, gaugeFraction, gaugeStatus } from '../calc/measurements';
+import { graphScale } from '../calc/graph-scale';
 import type { MetricHistory, Stats24h } from '../data/history-stats';
 import type { FullDisplay, GaugeTone, Measurement } from '../types';
 import './range-bar';
@@ -36,6 +37,7 @@ export class MplMetricRow extends LitElement {
   @property({ attribute: false }) measurement!: Measurement;
   @property({ reflect: true }) tone: GaugeTone = 'unknown';
   @property({ attribute: false }) history: MetricHistory | null = null;
+  @property({ attribute: false }) events: { t: number; icon: string }[] = [];
   @property() display: FullDisplay = 'summary';
   @property({ type: Boolean }) daily = false;
   @property() periodText = 'last 24 h';
@@ -60,6 +62,7 @@ export class MplMetricRow extends LitElement {
     };
     const graph = (): TemplateResult => {
       const series = this.history?.series ?? [];
+      const scale = graphScale(series.map(({ v }) => v), m.min, m.max, m.unit);
       const last = series[series.length - 1];
       const end = last?.t ?? Date.now();
       const start = series[0]?.t ?? end - 86400000;
@@ -71,17 +74,18 @@ export class MplMetricRow extends LitElement {
       const formatter = new Intl.DateTimeFormat(this.locale, { ...timeOptions, timeZone: this.timeZone });
       const displayUnit = displayUnits[m.unit] ?? m.unit;
       const points = series.map(({ t, v }) => ({
-        t, f: fraction(v),
+        t, f: scale.map(v),
         label: `${formatter.format(t)} · ${formatValue(v, m.unit, true)}${displayUnit ? ' ' + displayUnit : ''}`,
       }));
       const marker = (point: MetricHistory['minPoint']) => {
         if (!point) return null;
-        const f = fraction(point.v);
+        const f = scale.map(point.v);
         return f === null ? null : { t: point.t, f, ok: gaugeStatus(point.v, m.min, m.max) === 'ok' };
       };
-      const currentFraction = fraction(last?.v ?? null);
+      const currentFraction = scale.map(last?.v ?? null);
       return html`<mpl-history-graph
         .points=${points} .start=${start} .end=${end}
+        .thresholdLow=${scale.thresholdLow} .thresholdHigh=${scale.thresholdHigh} .events=${this.events}
         .minMarker=${marker(this.history?.minPoint ?? null)}
         .maxMarker=${marker(this.history?.maxPoint ?? null)}
         .current=${last && currentFraction !== null ? { t: last.t, f: currentFraction, tone: this.tone } : null}

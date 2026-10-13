@@ -291,6 +291,8 @@ describe('mpl-metric-row graph display', () => {
     minMarker: { t: number; f: number; ok: boolean } | null;
     maxMarker: { t: number; f: number; ok: boolean } | null;
     current: { t: number; f: number; tone: GaugeTone } | null;
+    thresholdLow: number | null; thresholdHigh: number | null;
+    events: { t: number; icon: string }[];
     summary: string;
   };
   const graph = (el: MplMetricRow) => element(el, 'mpl-history-graph') as HTMLElement & GraphProps;
@@ -345,6 +347,51 @@ describe('mpl-metric-row graph display', () => {
       await el.updateComplete;
       expect(props.current).to.equal(null);
     }
+  });
+
+  for (const scenario of [
+    { name: 'below', values: [1, null, 2, 3], low: 0.92, high: null },
+    { name: 'above', values: [30, null, 35, 40], low: null, high: 0.08 },
+    { name: 'dipping into ideal', values: [1, null, 10, 30], low: 0.2, high: 0.8 },
+  ]) {
+    it(`uses the ${scenario.name} scale for DLI points, markers and current`, async () => {
+      const measurement: Measurement = { ...moisture, key: 'dli', unit: 'mol/d⋅m²', min: 10, max: 30, value: 999 };
+      const series = scenario.values.map((v, index) => ({ t: start + index * hour, v }));
+      const minPoint = { t: series[0].t, v: scenario.values[0]! };
+      const maxPoint = { t: series[3].t, v: scenario.values[3]! };
+      const el = await graphRow(measurement, { stats: null, series, minPoint, maxPoint });
+      const props = graph(el);
+      const fraction = (v: number | null) => v === null ? null : scenario.name === 'below'
+        ? 0.08 + 0.84 * (v - 1) / (10 - 1)
+        : scenario.name === 'above' ? 0.08 + 0.84 * (v - 30) / (40 - 30)
+          : gaugeFraction(v, 10, 30, measurement.unit);
+      for (const [index, point] of props.points.entries()) {
+        const expected = fraction(series[index].v);
+        if (expected === null) expect(point.f).to.equal(null);
+        else expect(point.f).to.be.closeTo(expected, 1e-12);
+      }
+      expect(props.thresholdLow).to.equal(scenario.low);
+      expect(props.thresholdHigh).to.equal(scenario.high);
+      expect(props.minMarker!.f).to.be.closeTo(fraction(minPoint.v)!, 1e-12);
+      expect(props.maxMarker!.f).to.be.closeTo(fraction(maxPoint.v)!, 1e-12);
+      expect(props.current!.f).to.be.closeTo(fraction(maxPoint.v)!, 1e-12);
+      expect(props.current!.t).to.equal(maxPoint.t);
+      expect(props.minMarker!.ok).to.equal(minPoint.v >= 10 && minPoint.v <= 30);
+      expect(props.maxMarker!.ok).to.equal(maxPoint.v >= 10 && maxPoint.v <= 30);
+    });
+  }
+
+  it('defaults events to empty and passes the supplied array straight through reactively', async () => {
+    const el = await graphRow();
+    expect(el.events).to.deep.equal([]);
+    expect(graph(el).events).to.equal(el.events);
+    const events = [{ t: start + hour, icon: 'mdi:weather-sunset-up' }];
+    el.events = events;
+    await el.updateComplete;
+    expect(graph(el).events).to.equal(events);
+    el.events = [];
+    await el.updateComplete;
+    expect(graph(el).events).to.equal(el.events);
   });
 
   it('formats time by domain duration and daily dates, with compact DLI units', async () => {

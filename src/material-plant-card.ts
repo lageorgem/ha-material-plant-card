@@ -10,7 +10,7 @@ import './gauge/plant-gauge';
 import './battery/battery-glyph';
 import { fetchHistory, summarizeHourly, summarizeDailyMax, localDayStart, type HistoryFetch, type RawHistory, type MetricHistory } from './data/history-stats';
 import { resolveMetric, PERIOD_MS } from './calc/metric-settings';
-import { isDaylight } from './calc/sun';
+import { isDaylight, sunEvents } from './calc/sun';
 import { describeWithStats } from './full/metric-row';
 
 const REFRESH_INTERVAL = 5000;
@@ -601,6 +601,10 @@ export class MaterialPlantCard extends LitElement {
           const cumulative = this._isCumulative(m.sensor);
           const lat = this.hass!.config?.latitude;
           const lon = this.hass!.config?.longitude;
+          const events = m.key === 'illuminance' && !cumulative && Number.isFinite(lat) && Number.isFinite(lon) && r.periodMs <= 3 * 86400000
+            ? sunEvents(now - r.periodMs, now, lat!, lon!).map(event => ({
+              t: event.t, icon: event.kind === 'sunrise' ? 'mdi:weather-sunset-up' : 'mdi:weather-sunset-down',
+            })) : [];
           const daylight = !cumulative && r.daylightOnly && Number.isFinite(lat) && Number.isFinite(lon);
           const keep = daylight ? (start: number, end: number) => isDaylight(start, end, lat!, lon!, r.daylightOffset) : undefined;
           const daylightNow = !keep || keep(now, now);
@@ -625,7 +629,7 @@ export class MaterialPlantCard extends LitElement {
               if (event.key === ' ') event.preventDefault();
               this._moreInfo(m.sensor ?? cfg.entity);
             }}>
-            <mpl-metric-row .measurement=${m} .tone=${tone} .display=${r.display} .history=${history}
+            <mpl-metric-row .measurement=${m} .tone=${tone} .display=${r.display} .history=${history} .events=${events}
               .periodLabel=${periodLabel} .periodText=${periodText} .daily=${cumulative && r.days > 1}
               .locale=${this.hass!.locale?.language ?? this.hass!.language} .timeZone=${tz} .hideUnits=${hideUnits} .showHistory=${!cfg.hide_history}></mpl-metric-row>
           </div>`;
