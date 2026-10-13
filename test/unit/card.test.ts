@@ -126,7 +126,19 @@ describe('material-plant-card', () => {
         hass.states['sensor.dli'] = state('0.7', { state_class: 'total_increasing' });
         const card = await mount(full({ show_bars: ['dli'], full_display: 'graph', metrics: { dli: { days } } }), hass);
         const history = rows(card)[0].history!;
-        expect(history.minPoint?.v).to.equal(days === 1 ? 0 : 0.7);
+        // The stub uses browser-local midnight; the card clips to HA's UTC day.
+        // A stubbed reset before UTC midnight is not a plotted point.
+        if (days === 1) {
+          const stubStart = localDayStart(Date.now());
+          const utcStart = localDayStart(Date.now(), 0, 'UTC');
+          const expected = [
+            { start: stubStart, v: 0 }, { start: stubStart + 3600000, v: 0.7 },
+          ].filter(point => point.start >= utcStart && point.start < utcStart + 86400000)
+            .map(point => ({ t: point.start + 1800000, v: point.v }));
+          expect(history.series).to.deep.equal([...expected, { t: Date.now(), v: 0.7 }]);
+        }
+        const plottedValues = history.series.flatMap(point => point.v === null ? [] : [point.v]);
+        expect(history.minPoint?.v).to.equal(Math.min(...plottedValues));
         expect(history.maxPoint?.v).to.equal(days === 1 ? 0.7 : 12);
         for (const point of [history.minPoint, history.maxPoint]) {
           expect(history.series.some(p => p.t === point?.t && p.v === point?.v)).to.equal(true);
