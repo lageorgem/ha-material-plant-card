@@ -205,6 +205,51 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
+    it('suppresses tile hover for graph paths across shadow roots, but not other row content', async () => {
+      const card = await mount(full({ show_bars: ['moisture'], full_display: 'graph' }));
+      const tile = query(card, '.tile');
+      const row = rows(card)[0];
+      await row.updateComplete;
+      const graph = row.shadowRoot!.querySelector('mpl-history-graph')!;
+      await graph.updateComplete;
+      const target = graph.shadowRoot!.querySelector('svg')!;
+      const pointer = (element: Element, type: string, pointerType = 'mouse') =>
+        element.dispatchEvent(new PointerEvent(type, { pointerType, pointerId: 1, bubbles: true, composed: true }));
+      // Synthetic pointer events do not set :hover. Mirror the production selector
+      // with a test class to verify its computed background without browser input.
+      const style = document.createElement('style');
+      style.textContent = MaterialPlantCard.styles.map((sheet) => sheet.cssText).join('\n').replaceAll(':hover', '.test-hover');
+      card.shadowRoot!.append(style);
+      const background = getComputedStyle(tile).backgroundColor;
+      tile.classList.add('test-hover');
+      const hoverBackground = getComputedStyle(tile).backgroundColor;
+      expect(hoverBackground).not.to.equal(background);
+      pointer(target, 'pointerover');
+      expect(tile.classList.contains('graph-active')).to.equal(true);
+      expect(getComputedStyle(tile).backgroundColor).to.equal(background);
+      pointer(target, 'pointerout');
+      pointer(row.shadowRoot!.querySelector('.title')!, 'pointerover');
+      expect(tile.classList.contains('graph-active')).to.equal(false);
+      expect(getComputedStyle(tile).backgroundColor).to.equal(hoverBackground);
+      pointer(target, 'pointerover');
+      pointer(tile, 'pointerleave');
+      expect(tile.classList.contains('graph-active')).to.equal(false);
+      for (const release of ['pointerup', 'pointercancel']) {
+        pointer(target, 'pointerdown', 'touch');
+        expect(tile.classList.contains('graph-active')).to.equal(true);
+        expect(getComputedStyle(tile).backgroundColor).to.equal(background);
+        window.dispatchEvent(new PointerEvent(release, { pointerType: 'touch', pointerId: 1 }));
+        expect(tile.classList.contains('graph-active')).to.equal(false);
+      }
+      pointer(target, 'pointerover');
+      pointer(target, 'pointerdown');
+      pointer(target, 'pointerup');
+      expect(tile.classList.contains('graph-active')).to.equal(true);
+      expect(getComputedStyle(tile).backgroundColor).to.equal(background);
+      card.remove();
+      expect(tile.classList.contains('graph-active')).to.equal(false);
+    });
+
     it('applies the daylight offset and refetches changed daylight settings after throttling', async () => {
       const clock = clockForStats();
       const hass = illuminanceHass('3000');

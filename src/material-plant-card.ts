@@ -74,6 +74,44 @@ export class MaterialPlantCard extends LitElement {
   private _tooltipHovered = false;
   private _focusedGauge?: HTMLButtonElement;
   private _touchTooltip = false;
+  private _graphPress?: { tile: HTMLElement; id: number };
+
+  private _fromGraph(event: Event): boolean {
+    return event.composedPath().some((target) => target instanceof Element && target.tagName === 'MPL-HISTORY-GRAPH');
+  }
+
+  private _tilePointerOver(event: PointerEvent): void {
+    const tile = event.currentTarget as HTMLElement;
+    tile.classList.toggle('graph-active', this._fromGraph(event) || this._graphPress?.tile === tile);
+  }
+
+  private _tilePointerOut(event: PointerEvent): void {
+    const tile = event.currentTarget as HTMLElement;
+    if (this._fromGraph(event) && this._graphPress?.tile !== tile) tile.classList.remove('graph-active');
+  }
+
+  private _tilePointerDown(event: PointerEvent): void {
+    if (!this._fromGraph(event)) return;
+    const tile = event.currentTarget as HTMLElement;
+    this._graphPress = { tile, id: event.pointerId };
+    tile.classList.add('graph-active');
+  }
+
+  private _tilePointerLeave(event: PointerEvent): void {
+    const tile = event.currentTarget as HTMLElement;
+    tile.classList.remove('graph-active');
+    if (this._graphPress?.tile === tile) this._graphPress = undefined;
+  }
+
+  private _graphPointerRelease = (event: PointerEvent): void => {
+    const press = this._graphPress;
+    if (!press || press.id !== event.pointerId) return;
+    this._graphPress = undefined;
+    // Mouse release still over the graph must not restore the tile's hover layer.
+    if (event.type === 'pointercancel' || event.pointerType !== 'mouse' || !this._fromGraph(event)) {
+      press.tile.classList.remove('graph-active');
+    }
+  };
 
   private _clearClickSuppression(): void {
     clearTimeout(this._suppressClickTimer);
@@ -424,6 +462,8 @@ export class MaterialPlantCard extends LitElement {
     window.addEventListener('pointermove', this._gaugePointerMove, true);
     window.addEventListener('pointerup', this._gaugePointerUp, true);
     window.addEventListener('pointercancel', this._gaugePointerCancel, true);
+    window.addEventListener('pointerup', this._graphPointerRelease, true);
+    window.addEventListener('pointercancel', this._graphPointerRelease, true);
     window.addEventListener('scroll', this._dismissTooltip, true);
     this.addEventListener('scroll', this._dismissTooltip, true);
     window.addEventListener('keydown', this._tooltipKeydown, true);
@@ -435,6 +475,10 @@ export class MaterialPlantCard extends LitElement {
     window.removeEventListener('pointermove', this._gaugePointerMove, true);
     window.removeEventListener('pointerup', this._gaugePointerUp, true);
     window.removeEventListener('pointercancel', this._gaugePointerCancel, true);
+    window.removeEventListener('pointerup', this._graphPointerRelease, true);
+    window.removeEventListener('pointercancel', this._graphPointerRelease, true);
+    this._graphPress = undefined;
+    this.shadowRoot?.querySelectorAll('.graph-active').forEach((tile) => tile.classList.remove('graph-active'));
     window.removeEventListener('scroll', this._dismissTooltip, true);
     this.removeEventListener('scroll', this._dismissTooltip, true);
     window.removeEventListener('keydown', this._tooltipKeydown, true);
@@ -570,6 +614,8 @@ export class MaterialPlantCard extends LitElement {
           const periodText = cumulative ? r.days === 1 ? 'today' : `daily maximum, last ${r.days} days`
             : `${daylight ? 'daylight, ' : ''}last ${long}`;
           return html`<div class=${`tile${problemTone === 'problem' ? ' problem' : ''}`} role="button" tabindex="0" aria-label=${describeWithStats(m, history?.stats ?? null, periodText)}
+            @pointerover=${this._tilePointerOver} @pointerout=${this._tilePointerOut} @pointerleave=${this._tilePointerLeave}
+            @pointerdown=${{ handleEvent: (event: PointerEvent) => this._tilePointerDown(event), capture: true }}
             @click=${() => this._moreInfo(m.sensor ?? cfg.entity)}
             @keydown=${(event: KeyboardEvent) => {
               if (event.target !== event.currentTarget || (event.key !== 'Enter' && event.key !== ' ')) return;
@@ -634,7 +680,10 @@ export class MaterialPlantCard extends LitElement {
     .tile.problem { background: linear-gradient(to right, var(--mpl-surface-container-high) 45%, color-mix(in srgb, var(--mpl-error-container) 40%, var(--mpl-surface-container-high))); }
     .tile:first-child { border-top-left-radius: var(--mpl-tile-outer-corner); border-top-right-radius: var(--mpl-tile-outer-corner); }
     .tile:last-child { border-bottom-left-radius: var(--mpl-tile-outer-corner); border-bottom-right-radius: var(--mpl-tile-outer-corner); }
-    .tile:hover { background-color: color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-container-high)); }
+    /* Touch can leave a sticky :hover after scrubbing; only hover-capable inputs get this layer. */
+    @media (hover: hover) {
+      .tile:hover:not(.graph-active) { background-color: color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-container-high)); }
+    }
     .warning { color: var(--mpl-error); }
   `];
 }
