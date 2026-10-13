@@ -320,20 +320,35 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
-    it('preserves nighttime gaps and excludes current illuminance without forcing its tone red', async () => {
+    it('preserves nighttime graph readings and excludes current illuminance from fine summaries without forcing its tone red', async () => {
       const clock = clockForStats();
       clock.setSystemTime(Date.UTC(2026, 0, 15, 22));
       const hass = illuminanceHass('0');
+      hass.config.time_zone = 'UTC';
       const day = Date.UTC(2026, 0, 15, 11);
       const night = Date.UTC(2026, 0, 15, 20);
-      hass.callWS.onSecondCall().resolves({ 'sensor.illuminance': [
-        { start: day, end: day + 3600000, min: 2000, max: 4000, mean: 3000 },
+      const hourly = [
+        { start: day, end: day + 3600000, min: 1000, max: 8000, mean: 6000 },
         { start: night, end: night + 3600000, min: 0, max: 0, mean: 0 },
-      ] });
-      const card = await mount(full({ show_bars: ['illuminance'] }), hass);
+      ];
+      const fine = [
+        { start: day, end: day + 300000, min: 2000, max: 4000, mean: 3000 },
+        { start: night, end: night + 300000, min: 0, max: 90000, mean: 50000 },
+      ];
+      hass.callWS.callsFake(async (msg: Record<string, unknown>) => {
+        if (msg.type === 'plant/get_info') return { result: { ...info,
+          illuminance: { min: 2000, max: 30000, sensor: 'sensor.illuminance', unit_of_measurement: 'lx' } } };
+        return { 'sensor.illuminance': msg.period === '5minute' ? fine : hourly };
+      });
+      const card = await mount(full({ show_bars: ['illuminance'], full_display: 'graph' }), hass);
       const row = rows(card)[0];
+      expect(calls(hass).map(call => call.args[0].period)).to.deep.equal(['hour', '5minute']);
       expect(row.history?.stats).to.deep.equal({ min: 2000, max: 4000, mean: 3000 });
-      expect(row.history?.series).to.deep.equal([{ t: day + 1800000, v: 3000 }, { t: night + 1800000, v: null }]);
+      expect(row.history?.minPoint).to.deep.equal({ t: day + 150000, v: 2000 });
+      expect(row.history?.maxPoint).to.deep.equal({ t: day + 150000, v: 4000 });
+      expect(row.history?.series).to.deep.equal([
+        { t: day + 1800000, v: 6000 }, { t: night + 1800000, v: 0 }, { t: Date.now(), v: 0 },
+      ]);
       expect(row.tone).to.equal('advisory');
       expect(query(card, '.tile').classList.contains('problem')).to.equal(false);
       card.remove();
