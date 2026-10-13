@@ -1,4 +1,5 @@
 import { DEFAULT_ICONS, MEASUREMENT_LABELS } from '../types';
+import { resolveMetric } from './metric-settings';
 import type {
   BatteryInfo, GaugeStatus, GaugeTone, MaterialPlantCardConfig, Measurement,
   MeasurementKey, PlantInfo, Problem,
@@ -39,6 +40,7 @@ export function buildMeasurements(
   info: PlantInfo | undefined,
   keys: readonly string[],
   states: Record<string, { state: string; attributes: Record<string, unknown> }>,
+  iconOverrides?: Partial<Record<string, string>>,
 ): Measurement[] {
   const measurements: Measurement[] = [];
   for (const key of new Set(keys)) {
@@ -54,7 +56,9 @@ export function buildMeasurements(
     const unit = String(state?.attributes.unit_of_measurement ?? entry.unit_of_measurement ?? '');
     const fallbackIcon = Object.prototype.hasOwnProperty.call(DEFAULT_ICONS, key)
       ? DEFAULT_ICONS[key as MeasurementKey] : 'mdi:help-circle-outline';
-    const icon = typeof entry.icon === 'string' && entry.icon.length > 0 ? entry.icon : fallbackIcon;
+    const override = iconOverrides?.[key];
+    const icon = typeof override === 'string' && override.length > 0 ? override
+      : typeof entry.icon === 'string' && entry.icon.length > 0 ? entry.icon : fallbackIcon;
     measurements.push({
       key, label: labelFor(key), sensor, icon, unit, value, min, max,
       status: gaugeStatus(value, min, max), fraction: gaugeFraction(value, min, max, unit),
@@ -111,33 +115,45 @@ export function toneFor(m: Measurement, problems: readonly Problem[]): GaugeTone
 export function activeProblems(
   plant: { state: string; attributes: Record<string, unknown> } | undefined,
   measurements: readonly Measurement[],
-  config: Pick<MaterialPlantCardConfig, 'problem_source' | 'problem_sensors'>,
+  config: MaterialPlantCardConfig,
 ): Problem[] {
-  const allowed = Array.isArray(config.problem_sensors) && config.problem_sensors.length > 0
-    ? new Set(config.problem_sensors) : undefined;
   const problems: Problem[] = [];
   const seen = new Set<string>();
-  if (config.problem_source === 'gauges') {
-    for (const m of measurements) {
+  const entries = plant?.attributes.problems;
+  const plantProblems = new Map<string, Problem>();
+  if (Array.isArray(entries)) {
+    for (const entry of entries) {
+      if (!entry || typeof entry !== 'object') continue;
+      const { sensor_type: key, status } = entry as Record<string, unknown>;
+      if (typeof key !== 'string' || plantProblems.has(key)) continue;
+      const text = typeof status === 'string' ? status : '';
+      plantProblems.set(key, {
+        key, label: labelFor(key), status: /low/i.test(text) ? 'low' : /high/i.test(text) ? 'high' : 'problem',
+      });
+    }
+  }
+  for (const m of measurements) {
+    if (seen.has(m.key)) continue;
+    const trigger = resolveMetric(config, m.key).trigger;
+    if (trigger === 'plant') {
+      const problem = plantProblems.get(m.key);
+      if (!problem) continue;
+      problems.push({ ...problem, label: m.label });
+    } else {
       if (m.status !== 'low' && m.status !== 'high') continue;
-      if ((allowed && !allowed.has(m.key)) || seen.has(m.key)) continue;
+      if (trigger !== 'out_of_range' && trigger !== m.status) continue;
       problems.push({ key: m.key, label: m.label, status: m.status });
-      seen.add(m.key);
     }
-  } else {
-    const entries = plant?.attributes.problems;
-    if (Array.isArray(entries)) {
-      for (const entry of entries) {
-        if (!entry || typeof entry !== 'object') continue;
-        const { sensor_type: key, status } = entry as Record<string, unknown>;
-        if (typeof key !== 'string' || (allowed && !allowed.has(key)) || seen.has(key)) continue;
-        const text = typeof status === 'string' ? status : '';
-        problems.push({ key, label: labelFor(key), status: /low/i.test(text) ? 'low' : /high/i.test(text) ? 'high' : 'problem' });
-        seen.add(key);
-      }
-    } else if (plant?.state === 'problem') {
-      problems.push({ key: 'plant', label: 'Needs attention', status: 'problem' });
-    }
+    seen.add(m.key);
+  }
+  const shown = new Set(measurements.map(m => m.key));
+  for (const [key, problem] of plantProblems) {
+    if (shown.has(key) || seen.has(key) || resolveMetric(config, key).trigger !== 'plant') continue;
+    problems.push(problem);
+    seen.add(key);
+  }
+  if (!Array.isArray(entries) && plant?.state === 'problem' && config.problem_source !== 'gauges' && !seen.has('plant')) {
+    problems.push({ key: 'plant', label: 'Needs attention', status: 'problem' });
   }
   return problems;
 }
