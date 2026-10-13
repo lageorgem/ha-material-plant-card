@@ -8,14 +8,14 @@
 # Changes: https://github.com/lageorgem/ha-material-plant-card/blob/master/CHANGELOG.md
 before:
   type: custom:flower-card
-  entity: plant.orhideea
+  entity: plant.orchid
   name: Orchid
   display_type: full
   show_bars: [moisture, conductivity, temperature, illuminance, humidity, dli]
   hide_species: false
   hide_image: false
   hide_units: false
-  battery_sensor: sensor.sh_5_battery
+  battery_sensor: sensor.orchid_battery
   battery_ok_level: 40
   bars_per_row: 6
   show_care: []
@@ -23,7 +23,7 @@ before:
 
 after:
   type: custom:material-plant-card
-  entity: plant.orhideea
+  entity: plant.orchid
   name: Orchid
   display_type: full
   hide_species: false
@@ -31,7 +31,7 @@ after:
   # Optional boolean, default false: true hides full-mode current-value units
   # and graph hover units, or complete compact gauge value text.
   hide_units: false
-  battery_sensor: sensor.sh_5_battery
+  battery_sensor: sensor.orchid_battery
   battery_warn_level: 10
   # Optional ordered list; each entry requires a string type. Order preserved.
   # Entries default to summary, today, plant trigger, DLI days 7,

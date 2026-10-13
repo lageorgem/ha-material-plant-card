@@ -3,7 +3,7 @@
 # Options: https://github.com/lageorgem/ha-material-plant-card#card-options
 # Changes: https://github.com/lageorgem/ha-material-plant-card/blob/master/CHANGELOG.md
 type: custom:material-plant-card
-entity: plant.orhideea
+entity: plant.orchid
 name: Orchid
 # Default: full tiles; choose compact for circular gauges.
 display_type: full
@@ -13,7 +13,7 @@ hide_image: false
 # values and in graph hover bubbles, or complete compact gauge value text.
 hide_units: false
 image: /local/plants/orchid.jpg
-battery_sensor: sensor.sh_5_battery
+battery_sensor: sensor.orchid_battery
 # Optional number, default 10: battery turns red below this percentage.
 battery_warn_level: 10
 # Optional ordered list; type is required in every entry. Order = display order.
@@ -59,7 +59,7 @@ metrics:
 # icons and triggers still apply; history/display settings affect full mode only.
 # Uncomment these compact-only options after changing display_type:
 # gauges_per_row: 3
-# gauge_size: 56
+# gauge_size: 60
 # gauges_per_row: optional integer, 1–12; omit for automatic balanced rows.
 # Requested rows fill left to right; last row is centred. If the card is too
 # narrow, it falls back to automatic rows. Flower-card's bars_per_row is ignored.
