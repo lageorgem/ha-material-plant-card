@@ -116,7 +116,7 @@ describe('mpl-history-graph', () => {
     expect(node(el, '.history-line').getAttribute('d')).not.to.match(/NaN|Infinity/);
   });
 
-  it('places min/max triangle tips and inherits their independent status colours', async () => {
+  it('anchors min/max triangle bases at the edges with independent status dots on the line', async () => {
     const el = await mount();
     el.minMarker = { t: 25, f: 0.2, ok: true };
     el.maxMarker = { t: 75, f: 0.8, ok: false };
@@ -124,12 +124,28 @@ describe('mpl-history-graph', () => {
     const min = node<SVGPolygonElement>(el, '.min-marker');
     const max = node<SVGPolygonElement>(el, '.max-marker');
     expect(min.points.getItem(0).x).to.equal(60);
-    expect(min.points.getItem(0).y).to.be.closeTo(39, 0.001);
+    expect(min.points.getItem(0).y).to.equal(42);
     expect(max.points.getItem(0).x).to.equal(180);
-    expect(max.points.getItem(0).y).to.be.closeTo(9, 0.001);
+    expect(max.points.getItem(0).y).to.equal(6);
     expect(min.points.getItem(1).y - min.points.getItem(0).y).to.equal(6);
     expect(max.points.getItem(0).y - max.points.getItem(1).y).to.equal(6);
     expect(min.points.getItem(2).x - min.points.getItem(1).x).to.equal(8);
+    expect(max.points.getItem(2).x - max.points.getItem(1).x).to.equal(8);
+    for (const [kind, x, base, cy, fill] of [
+      ['min', 60, 48, 36, 'rgb(10, 20, 30)'],
+      ['max', 180, 0, 12, 'rgb(40, 50, 60)'],
+    ] as const) {
+      const triangle = node<SVGPolygonElement>(el, `.${kind}-marker`);
+      expect(triangle.points.getItem(1).y).to.equal(base);
+      expect(triangle.points.getItem(2).y).to.equal(base);
+      expect(triangle.points.getItem(1).x).to.equal(x - 4);
+      expect(triangle.points.getItem(2).x).to.equal(x + 4);
+      const dot = node<SVGCircleElement>(el, `.${kind}-dot`);
+      expect(dot.cx.baseVal.value).to.equal(x);
+      expect(dot.cy.baseVal.value).to.equal(cy);
+      expect(dot.r.baseVal.value).to.equal(2.5);
+      expect(getComputedStyle(dot).fill).to.equal(fill);
+    }
     expect(getComputedStyle(min).fill).to.equal('rgb(10, 20, 30)');
     expect(getComputedStyle(max).fill).to.equal('rgb(40, 50, 60)');
     el.minMarker = { ...el.minMarker, ok: false };
@@ -137,9 +153,101 @@ describe('mpl-history-graph', () => {
     await el.updateComplete;
     expect(getComputedStyle(min).fill).to.equal('rgb(40, 50, 60)');
     expect(getComputedStyle(max).fill).to.equal('rgb(10, 20, 30)');
+    expect(getComputedStyle(node(el, '.min-dot')).fill).to.equal('rgb(40, 50, 60)');
+    expect(getComputedStyle(node(el, '.max-dot')).fill).to.equal('rgb(10, 20, 30)');
     el.minMarker = el.maxMarker = null;
     await el.updateComplete;
-    expect(el.shadowRoot!.querySelector('.min-marker, .max-marker, .avg-marker')).to.equal(null);
+    expect(el.shadowRoot!.querySelector('.min-marker, .max-marker, .min-dot, .max-dot, .avg-marker')).to.equal(null);
+  });
+
+  for (const [low, high] of [[0.2, 0.8], [0.92, null], [null, 0.08], [null, null]] as const) {
+    it(`uses configurable threshold guides and paint for (${low}, ${high})`, async () => {
+      const el = await mount([
+        { t: 0, f: 0.04, label: 'Below' }, { t: 25, f: null, label: 'Gap' },
+        { t: 50, f: 0.5, label: 'Middle' }, { t: 75, f: null, label: 'Gap' },
+        { t: 100, f: 0.96, label: 'Above' },
+      ]);
+      el.thresholdLow = low;
+      el.thresholdHigh = high;
+      await el.updateComplete;
+      const ys = [high, low].filter(f => f !== null).map(f => 44 - f * 40);
+      const guides = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')];
+      expect(guides.length).to.equal(ys.length);
+      for (const [index, guide] of guides.entries()) {
+        expect(guide.y1.baseVal.value).to.be.closeTo(ys[index], 0.001);
+        expect(guide.y2.baseVal.value).to.be.closeTo(ys[index], 0.001);
+      }
+      expect(guides.every(guide => guide.x2.baseVal.value === 240)).to.equal(true);
+      const success = 'rgb(10, 20, 30)';
+      const error = 'rgb(40, 50, 60)';
+      const expected: [number, string][] = [[0, high === null ? success : error]];
+      if (high !== null) expected.push([(44 - high * 40) / 48, error], [(44 - high * 40) / 48, success]);
+      if (low !== null) expected.push([(44 - low * 40) / 48, success], [(44 - low * 40) / 48, error]);
+      expected.push([1, low === null ? success : error]);
+      const stops = [...node(el, 'linearGradient').querySelectorAll('stop')];
+      expect(stops.map(stop => [Number(stop.getAttribute('offset')), getComputedStyle(stop).stopColor]))
+        .to.deep.equal(expected);
+      const paint = `url(#${node(el, 'linearGradient').id})`;
+      expect(node(el, '.history-line').getAttribute('stroke')).to.equal(paint);
+      const isolated = [...el.shadowRoot!.querySelectorAll('.isolated-point')];
+      expect(isolated.length).to.equal(3);
+      expect(isolated.every(dot => dot.getAttribute('fill') === paint)).to.equal(true);
+      for (const [x, f] of [[0, 0.04], [120, 0.5], [240, 0.96]]) {
+        pointer(el, 'pointermove', x);
+        await el.updateComplete;
+        expect(getComputedStyle(node(el, '.hover-dot')).fill)
+          .to.equal((low !== null && f < low) || (high !== null && f > high) ? error : success);
+      }
+    });
+  }
+
+  it('draws in-domain event lines beneath the history and clamps top-edge icons inside the host', async () => {
+    const el = await mount();
+    expect(el.shadowRoot!.querySelector('.event-line, .event-icon')).to.equal(null);
+    el.events = [
+      { t: -1, icon: 'mdi:outside-before' },
+      { t: 0, icon: 'mdi:weather-sunset-up' },
+      { t: 50, icon: 'mdi:weather-sunset-down' },
+      { t: 100, icon: 'mdi:weather-sunset-up' },
+      { t: 101, icon: 'mdi:outside-after' },
+    ];
+    await el.updateComplete;
+    const lines = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.event-line')];
+    const icons = [...el.shadowRoot!.querySelectorAll<HTMLElement>('.event-icon')];
+    expect(lines.length).to.equal(3);
+    expect(icons.length).to.equal(3);
+    const host = el.getBoundingClientRect();
+    for (const [index, x] of [0, 120, 240].entries()) {
+      const line = lines[index];
+      expect(line.x1.baseVal.value).to.equal(x);
+      expect(line.x2.baseVal.value).to.equal(x);
+      expect(line.y1.baseVal.value).to.equal(0);
+      expect(line.y2.baseVal.value).to.equal(48);
+      expect(line.getAttribute('stroke-dasharray')).to.equal('1 3');
+      expect(line.getAttribute('stroke-width')).to.equal('1');
+      expect(getComputedStyle(line).stroke).to.equal('rgb(155, 143, 128)');
+      expect(getComputedStyle(line).opacity).to.equal('0.8');
+      expect(line.compareDocumentPosition(node(el, '.history-line')) & Node.DOCUMENT_POSITION_FOLLOWING).not.to.equal(0);
+      const icon = icons[index];
+      expect(icon.tagName.toLowerCase()).to.equal('ha-icon');
+      expect(icon.getAttribute('icon')).to.equal(el.events[index + 1].icon);
+      expect(icon.getAttribute('aria-hidden')).to.equal('true');
+      expect(getComputedStyle(icon).color).to.equal('rgb(70, 80, 90)');
+      const rect = icon.getBoundingClientRect();
+      expect(rect.width).to.equal(14);
+      expect(rect.height).to.equal(14);
+      expect(rect.top).to.be.closeTo(host.top, 0.001);
+      expect(rect.left).to.be.at.least(host.left);
+      expect(rect.right).to.be.at.most(host.right);
+      expect(rect.left - host.left + 7).to.equal(Math.max(7, Math.min(233, x)));
+    }
+    el.parentElement!.style.width = '320px';
+    await settle(el);
+    expect(lines[1].x1.baseVal.value).to.equal(160);
+    expect(icons[1].getBoundingClientRect().left - el.getBoundingClientRect().left + 7).to.equal(160);
+    el.events = [];
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector('.event-line, .event-icon')).to.equal(null);
   });
 
   it('renders the current ring for known tones only, with inherited ring fill', async () => {
