@@ -6,8 +6,17 @@ export interface GraphPoint { t: number; f: number | null; label: string; }
 export interface GraphMarker { t: number; f: number; ok: boolean; }
 export interface GraphCurrent { t: number; f: number; tone: GaugeTone; }
 
-const HEIGHT = 48;
-const y = (fraction: number): number => HEIGHT - 4 - fraction * (HEIGHT - 8);
+export const GRAPH_HEIGHT = 64;
+export const ICON_BAND = 14;
+export const MARKER_W = 7;
+export const MARKER_H = 5;
+export const MARKER_GAP = 2;
+export const PLOT_PAD = 10;
+const DOT_RADIUS = 2.5;
+const ICON_SIZE = 12;
+const yTop = ICON_BAND + PLOT_PAD;
+const yBottom = GRAPH_HEIGHT - PLOT_PAD;
+const y = (fraction: number): number => yBottom - fraction * (yBottom - yTop);
 const colour = (fraction: number, low: number | null, high: number | null): string =>
   (low !== null && fraction < low) || (high !== null && fraction > high)
     ? 'var(--mpl-error)' : 'var(--mpl-success)';
@@ -205,12 +214,15 @@ export class MplHistoryGraph extends LitElement {
   private _marker(marker: GraphMarker | null, kind: 'min' | 'max'): TemplateResult | typeof nothing {
     if (!marker) return nothing;
     const x = this._x(marker.t);
-    const base = kind === 'min' ? HEIGHT : 0;
-    const tip = kind === 'min' ? HEIGHT - 6 : 6;
+    // Only the triangle is clamped horizontally; its dot remains on the series point.
+    const triangleX = Math.max(MARKER_W / 2, Math.min(this._width - MARKER_W / 2, x));
+    const direction = kind === 'min' ? 1 : -1;
+    const tip = y(marker.f) + direction * (MARKER_GAP + DOT_RADIUS);
+    const base = tip + direction * MARKER_H;
     const fill = marker.ok ? 'var(--mpl-success)' : 'var(--mpl-error)';
-    return svg`<polygon class=${`${kind}-marker`} points=${`${x},${tip} ${x - 4},${base} ${x + 4},${base}`}
+    return svg`<polygon class=${`${kind}-marker`} points=${`${triangleX},${tip} ${triangleX - MARKER_W / 2},${base} ${triangleX + MARKER_W / 2},${base}`}
       fill=${fill}></polygon>
-      <circle class=${`${kind}-dot`} cx=${x} cy=${y(marker.f)} r="2.5" fill=${fill}></circle>`;
+      <circle class=${`${kind}-dot`} cx=${x} cy=${y(marker.f)} r=${DOT_RADIUS} fill=${fill}></circle>`;
   }
 
   protected render(): TemplateResult {
@@ -234,23 +246,23 @@ export class MplHistoryGraph extends LitElement {
       : current?.tone === 'advisory' ? 'var(--mpl-on-surface-variant)' : 'var(--mpl-success)';
 
     return html`
-      <svg width=${this._width} height=${HEIGHT} aria-hidden="true" focusable="false">
+      <svg width=${this._width} height=${GRAPH_HEIGHT} aria-hidden="true" focusable="false">
         <defs>
-          <linearGradient id=${this._gradientId} gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="0" y2=${HEIGHT}>
+          <linearGradient id=${this._gradientId} gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="0" y2=${GRAPH_HEIGHT}>
             <stop offset="0" stop-color=${high === null ? 'var(--mpl-success)' : 'var(--mpl-error)'}></stop>
             ${high !== null ? svg`
-              <stop offset=${y(high) / HEIGHT} stop-color="var(--mpl-error)"></stop>
-              <stop offset=${y(high) / HEIGHT} stop-color="var(--mpl-success)"></stop>` : nothing}
+              <stop offset=${y(high) / GRAPH_HEIGHT} stop-color="var(--mpl-error)"></stop>
+              <stop offset=${y(high) / GRAPH_HEIGHT} stop-color="var(--mpl-success)"></stop>` : nothing}
             ${low !== null ? svg`
-              <stop offset=${y(low) / HEIGHT} stop-color="var(--mpl-success)"></stop>
-              <stop offset=${y(low) / HEIGHT} stop-color="var(--mpl-error)"></stop>` : nothing}
+              <stop offset=${y(low) / GRAPH_HEIGHT} stop-color="var(--mpl-success)"></stop>
+              <stop offset=${y(low) / GRAPH_HEIGHT} stop-color="var(--mpl-error)"></stop>` : nothing}
             <stop offset="1" stop-color=${low === null ? 'var(--mpl-success)' : 'var(--mpl-error)'}></stop>
           </linearGradient>
         </defs>
         ${[high, low].filter(f => f !== null).map(f => svg`<line class="threshold-guide" x1="0" x2=${this._width}
           y1=${y(f)} y2=${y(f)} stroke="var(--mpl-outline)" opacity="1" stroke-width="1" stroke-dasharray="3 3"></line>`)}
         ${events.map(event => svg`<line class="event-line" x1=${this._x(event.t)} x2=${this._x(event.t)}
-          y1="16" y2=${HEIGHT} stroke="var(--mpl-outline)" stroke-width="1" stroke-dasharray="3 3" opacity="1"></line>`)}
+          y1=${ICON_BAND} y2=${GRAPH_HEIGHT} stroke="var(--mpl-outline)" stroke-width="1" stroke-dasharray="3 3" opacity="1"></line>`)}
         <path class="history-line" d=${path.trim()} fill="none" stroke=${gradient} stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"></path>
         ${isolated.map(point => svg`<circle class="isolated-point" cx=${this._x(point.t)} cy=${y(point.f!)}
@@ -262,13 +274,13 @@ export class MplHistoryGraph extends LitElement {
           fill="var(--mpl-range-bar-ring, var(--mpl-surface-container-high))"
           stroke=${currentColour} stroke-width="2"></circle>` : nothing}
         ${hover ? svg`
-          <line class="hover-guide" x1=${this._x(hover.t)} x2=${this._x(hover.t)} y1="0" y2=${HEIGHT}
+          <line class="hover-guide" x1=${this._x(hover.t)} x2=${this._x(hover.t)} y1=${ICON_BAND} y2=${GRAPH_HEIGHT}
             stroke="var(--mpl-on-surface-variant)" stroke-width="1" opacity="0.4"></line>
           <circle class="hover-dot" cx=${this._x(hover.t)} cy=${y(hover.f!)} r="3" fill=${colour(hover.f!, low, high)}></circle>
         ` : nothing}
       </svg>
       ${events.map(event => html`<ha-icon class="event-icon" icon=${event.icon} aria-hidden="true"
-        style=${`left: ${Math.max(0, Math.min(this._width - 14, this._x(event.t) - 7))}px`}></ha-icon>`)}
+        style=${`left: ${Math.max(0, Math.min(this._width - ICON_SIZE, this._x(event.t) - ICON_SIZE / 2))}px`}></ha-icon>`)}
       ${hover ? html`<div class=${this._mouseBubble ? 'bubble mouse-bubble' : 'bubble'} aria-hidden="true"
         @pointerenter=${this._bubbleEnter} @pointerleave=${this._bubbleLeave}>${hover.label}</div>` : nothing}
     `;
@@ -278,7 +290,7 @@ export class MplHistoryGraph extends LitElement {
     :host {
       display: block;
       position: relative;
-      height: 48px;
+      height: ${GRAPH_HEIGHT}px;
       width: 100%;
       touch-action: pan-y;
       cursor: crosshair;
@@ -286,11 +298,11 @@ export class MplHistoryGraph extends LitElement {
     svg { display: block; overflow: visible; }
     .event-icon {
       position: absolute;
-      top: 0;
+      top: 1px;
       display: block;
-      width: 14px;
-      height: 14px;
-      --mdc-icon-size: 14px;
+      width: ${ICON_SIZE}px;
+      height: ${ICON_SIZE}px;
+      --mdc-icon-size: ${ICON_SIZE}px;
       color: var(--mpl-on-surface-variant);
       pointer-events: none;
     }
