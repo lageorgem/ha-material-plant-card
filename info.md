@@ -45,13 +45,15 @@ metrics:
     icon: mdi:thermometer-lines
 ```
 
-Hover or touch/drag on a graph to see a point's time and value. The line is green inside the ideal band and error red outside it; min/max triangles also turn red outside ideal bounds. Touching the graph does not open more-info; the rest of the tile does. Today-only DLI omits min/max triangles.
+Hover or touch/drag on a graph to see a point's time and value. The hover bubble stays visible while hovered; Escape dismisses it. Touching or hovering the graph does not highlight or activate the tile or open more-info; the rest of the tile opens more-info. The line is green inside the ideal band and error red outside it. The minimum marker is an upward triangle on the bottom edge; the maximum marker is a downward triangle on the top edge, each with a dot on the line at that point. Min/max markers turn red outside ideal bounds. Today-only DLI omits min/max triangles.
+
+Graphs zoom to the data when every value stays at or below the ideal minimum, with that minimum as a dashed line at the top. When every value stays at or above the ideal maximum, that maximum sits at the bottom. Otherwise, graphs use the full scale with both dashed ideal guides. Illuminance graphs with windows up to 3 days show sunrise/sunset as dotted vertical lines with sunrise/sunset icons, using Home Assistant's configured location. Graph time labels use Home Assistant's configured time zone.
 
 ### Read daylight and DLI history
 
 Illuminance has optional `metrics.illuminance.daylight_only` (boolean, default `true`, example `false`) and `daylight_offset` (number in minutes, rounded and clamped to 0–180, default 30, example 45). Home Assistant's latitude/longitude determine sunrise and sunset. Only hourly buckets fully inside **sunrise + offset** to **sunset − offset** count; night hours become graph gaps. Labels read **Daylight · 24 h** or the selected period. A current reading outside that window is not counted or automatically forced red; it follows problem settings instead. Disabling the filter includes all hours. Missing location coordinates fall back to unfiltered history and **Last …** labels. The filter does not affect compact mode.
 
-DLI and other cumulative sensors (`state_class: total` or `total_increasing`) use the maximum hourly recorded state per local day; for DLI, that is the day's total. **Today is included**, partial so far. `days: 1` shows **Today** and today's hourly graph; larger windows show **Daily max · N d** and one point per day. Summary statistics describe those daily maxima; the large value remains today's running total. Long-term statistics support 30 days when the data exists.
+DLI and other cumulative sensors (`state_class: total` or `total_increasing`) use the maximum hourly recorded state per local day, with day boundaries in Home Assistant's configured time zone; for DLI, that is the day's total. **Today is included**, partial so far. `days: 1` shows **Today** and today's hourly graph; larger windows show **Daily max · N d** and one point per day. Summary statistics describe those daily maxima; the large value remains today's running total. Long-term statistics support 30 days when the data exists.
 
 Historical colours follow ideal bounds independently of problem settings. Non-cumulative current values, rings and title icons turn red outside ideal bounds, except for daylight-filtered illuminance outside its window. DLI current values keep the problem-setting colour. Only selected problems add a faint red tint.
 
