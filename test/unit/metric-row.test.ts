@@ -385,7 +385,7 @@ describe('mpl-metric-row graph display', () => {
     expect(graph(el).points[0].label).to.equal('Thu 00:30 · 12 %');
     el.daily = true;
     await el.updateComplete;
-    expect(graph(el).points[0].label).to.equal('Thu, 16 Jul · 12 %');
+    expect(graph(el).points[0].label).to.equal('Thu 16 Jul · 12 %');
     el.timeZone = 'UTC';
     await el.updateComplete;
     expect(graph(el).points[0].label).to.equal('Wed, 15 Jul · 12 %');
