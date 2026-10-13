@@ -54,6 +54,7 @@ export class MaterialPlantCard extends LitElement {
   private _statsRequest = 0;
   private _statsAppliedRequest = 0;
   private _statsLastFetch = -Infinity;
+  private _statsStarted = -Infinity;
   private _statsPending = true;
   private _statsInFlight?: number;
   private _statsTimer?: ReturnType<typeof setTimeout>;
@@ -65,6 +66,7 @@ export class MaterialPlantCard extends LitElement {
   private _gaugesInnerWidth?: number;
   private _imageSrc?: string;
   private _lastFetch = -Infinity;
+  private _fetchStarted = -Infinity;
   private _request = 0;
   private _appliedRequest = 0;
   private _inFlight?: number;
@@ -326,10 +328,9 @@ export class MaterialPlantCard extends LitElement {
   private _stopStats(dropMap = false): void {
     clearTimeout(this._statsTimer);
     this._statsTimer = undefined;
-    this._statsAppliedRequest = ++this._statsRequest;
-    this._statsPending ||= this._statsInFlight !== undefined;
-    this._statsInFlight = undefined;
     if (dropMap) {
+      this._statsAppliedRequest = ++this._statsRequest;
+      this._statsInFlight = undefined;
       this._statsRetryAt = undefined;
       this._statsRetryDelay = RETRY_INITIAL;
       this._statsDataKeys = {};
@@ -364,7 +365,7 @@ export class MaterialPlantCard extends LitElement {
       this._statsTimer = undefined;
       return;
     }
-    const elapsed = Date.now() - this._statsLastFetch;
+    const elapsed = Date.now() - Math.max(this._statsLastFetch, this._statsStarted);
     const wait = this._statsRetryAt !== undefined ? Math.max(0, this._statsRetryAt - Date.now())
       : this._statsPending ? Math.max(0, STATS_THROTTLE - elapsed) : Math.max(0, STATS_INTERVAL - elapsed);
     clearTimeout(this._statsTimer);
@@ -384,12 +385,13 @@ export class MaterialPlantCard extends LitElement {
     const request = ++this._statsRequest;
     this._statsInFlight = request;
     this._statsPending = false;
-    this._statsLastFetch = Date.now();
+    this._statsStarted = Date.now();
     this._syncStats();
     const result = await fetchHistory({
       callWS: <T>(message: Record<string, unknown>): Promise<T> => hass.callWS<T>(message as { type: string }),
-    }, sensors, this._statsLastFetch);
-    if (request > this._statsAppliedRequest && this.isConnected) {
+    }, sensors, this._statsStarted);
+    if (request > this._statsAppliedRequest && key === this._statsKey) {
+      this._statsLastFetch = Date.now();
       const groups = ['hourly', 'cumulative', 'fine'] as const;
       for (const group of groups) {
         if (!result.failedGroups[group]) {
@@ -484,8 +486,10 @@ export class MaterialPlantCard extends LitElement {
     // Demand schedules a refresh without invalidating useful in-flight metadata.
     this._pending = true;
     if (!this.isConnected || !this.hass || !this._config) return;
+    // Layout reattachment must reuse the first request, not start a duplicate.
+    if (!this._info && this._inFlight !== undefined) return;
     const wait = this._retryAt !== undefined ? Math.max(0, this._retryAt - Date.now())
-      : Math.max(0, REFRESH_INTERVAL - (Date.now() - this._lastFetch));
+      : Math.max(0, REFRESH_INTERVAL - (Date.now() - Math.max(this._lastFetch, this._fetchStarted)));
     if (wait === 0) {
       if (this._timer !== undefined) clearTimeout(this._timer);
       this._timer = undefined;
@@ -504,13 +508,13 @@ export class MaterialPlantCard extends LitElement {
     if (!this.isConnected || !hass || !entity) return;
     this._pending = false;
     this._retryAt = undefined;
-    this._lastFetch = Date.now();
+    this._fetchStarted = Date.now();
     const request = ++this._request;
     this._inFlight = request;
     try {
       const response = await hass.callWS<{ result: PlantInfo }>({ type: 'plant/get_info', entity_id: entity });
       if (!response?.result || typeof response.result !== 'object') throw new Error('Missing plant info');
-      if (request > this._appliedRequest && entity === this._config?.entity && this.isConnected) {
+      if (request > this._appliedRequest && entity === this._config?.entity) {
         this._info = response.result;
         this._appliedRequest = request;
         if (this._retryAt !== undefined) {
@@ -523,7 +527,7 @@ export class MaterialPlantCard extends LitElement {
       }
     } catch {
       // Integration can be starting up/offline. Preserve last good metadata and live readings.
-      if (request > this._appliedRequest && entity === this._config?.entity && this.isConnected && this._info === undefined) {
+      if (request > this._appliedRequest && entity === this._config?.entity && this._info === undefined) {
         this._retryAt = Date.now() + this._retryDelay;
         this._retryDelay = Math.min(RETRY_MAX, this._retryDelay * 2);
         clearTimeout(this._timer);
@@ -531,12 +535,25 @@ export class MaterialPlantCard extends LitElement {
         this._queueFetch();
       }
     } finally {
+      if (request >= this._appliedRequest && entity === this._config?.entity) this._lastFetch = Date.now();
       if (this._inFlight === request) this._inFlight = undefined;
+      if (this._pending) {
+        clearTimeout(this._timer);
+        this._timer = undefined;
+        this._queueFetch();
+      }
     }
   }
 
   public connectedCallback(): void {
     super.connectedCallback();
+    if (!this._info && this._inFlight === undefined) {
+      this._lastFetch = this._fetchStarted = -Infinity;
+      this._pending = true;
+    }
+    if (this._statsInFlight === undefined && !Object.values(this._statsDataKeys).includes(this._statsSensors(Date.now()).key)) {
+      this._statsLastFetch = this._statsStarted = -Infinity;
+    }
     if (this._pending) this._queueFetch();
     this._syncStats();
     this._observeGauges();
@@ -569,10 +586,7 @@ export class MaterialPlantCard extends LitElement {
     this._gaugesFrame = undefined;
     if (this._timer !== undefined) clearTimeout(this._timer);
     this._timer = undefined;
-    // A cancelled trailing fetch or invalidated response still needs replacement.
-    this._pending ||= this._inFlight !== undefined;
-    this._inFlight = undefined;
-    this._appliedRequest = ++this._request;
+    // Keep in-flight responses valid; only cancelled trailing demand needs resuming.
   }
 
   private get _gaugeSize(): number {

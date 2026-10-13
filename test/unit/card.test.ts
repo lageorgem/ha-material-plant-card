@@ -1293,6 +1293,49 @@ describe('material-plant-card', () => {
       card.remove();
     });
 
+    for (const resolveDetached of [false, true]) it(`retains pending history across layout detach (resolve detached=${resolveDetached})`, async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      let resolve!: (value: Record<string, { start: number; end: number; min: number; max: number; mean: number }[]>) => void;
+      hass.callWS.onSecondCall().returns(new Promise(done => { resolve = done; }));
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
+      const parent = card.parentElement!;
+      card.remove();
+      expect(clock.countTimers()).to.equal(0);
+      await clock.tickAsync(100);
+      if (!resolveDetached) parent.append(card);
+      resolve({ 'sensor.moisture': [{ start: Date.now() - 3600000, end: Date.now(), min: 1, max: 99, mean: 50 }] });
+      await settle(card);
+      if (resolveDetached) {
+        expect(clock.countTimers()).to.equal(0);
+        parent.append(card);
+      }
+      await settle(card);
+      expect(rows(card)[0].history?.stats?.mean).to.equal(50);
+      expect(calls(hass)).to.have.length(1);
+      await clock.tickAsync(59999);
+      expect(calls(hass)).to.have.length(1);
+      card.remove();
+      expect(clock.countTimers()).to.equal(0);
+    });
+
+    it('fetches missing current-key history immediately on reconnect', async () => {
+      const clock = clockForStats();
+      const hass = fakeHass();
+      const card = await mount(full({ show_bars: ['moisture'] }), hass);
+      const parent = card.parentElement!;
+      card.remove();
+      card.setConfig(full({ show_bars: ['temperature'] }));
+      expect(calls(hass)).to.have.length(1);
+      expect(clock.countTimers()).to.equal(0);
+      parent.append(card);
+      await settle(card);
+      expect(calls(hass)).to.have.length(2);
+      expect(calls(hass)[1].args[0].statistic_ids).to.deep.equal(['sensor.temperature']);
+      expect(rows(card)[0].history?.stats?.mean).to.equal(25);
+      card.remove();
+    });
+
     it('clears history timer on disconnect and refetches on reconnect after ten minutes', async () => {
       const clock = clockForStats();
       const hass = fakeHass();
@@ -1948,6 +1991,12 @@ describe('material-plant-card', () => {
         timing === 'during the throttle window' ? /^Conductivity:/ : /^Temperature:/);
       await clock.tickAsync(4000);
       await settle(card);
+      if (timing === 'during the throttle window') {
+        // The retained response completed one second after dispatch; throttle from completion.
+        expect(hass.callWS.callCount).to.equal(2);
+        await clock.tickAsync(1000);
+        await settle(card);
+      }
       expect(hass.callWS.callCount).to.equal(3);
       expect(hass.callWS.args.every(([request]) => request.entity_id === ENTITY)).to.equal(true);
       expect(gauges(card)).to.have.length(1);
@@ -2154,22 +2203,67 @@ describe('material-plant-card', () => {
     card.remove();
   });
 
-  it('retries an invalidated in-flight request on reconnect', async () => {
+  for (const resolveDetached of [false, true]) it(`retains in-flight info across layout detach (resolve detached=${resolveDetached})`, async () => {
     const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const hass = fakeHass();
     let resolveOld!: (response: { result: PlantInfo }) => void;
     hass.callWS.onFirstCall().returns(new Promise((resolve) => { resolveOld = resolve; }));
-    const card = await mount(cfg(), hass);
+    const card = await mount(cfg({ display_type: undefined, show_bars: ['temperature'] }), hass);
     card.remove();
+    expect(clock.countTimers()).to.equal(0);
+    await clock.tickAsync(100);
+    if (!resolveDetached) document.body.append(card);
     resolveOld({ result: { temperature: info.temperature } });
+    await settle(card);
+    if (resolveDetached) {
+      expect(clock.countTimers()).to.equal(0);
+      document.body.append(card);
+    }
+    await settle(card);
+    expect(query(card, '.tile')).to.exist;
+    const infoCalls = () => hass.callWS.getCalls().filter(call => call.args[0].type === 'plant/get_info');
+    expect(infoCalls()).to.have.length(1);
+    await clock.tickAsync(4999);
+    expect(infoCalls()).to.have.length(1);
+    card.remove();
+  });
+
+  it('fetches immediately when reattached before the initial hass assignment', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const card = await fixture<MaterialPlantCard>(html`<material-plant-card></material-plant-card>`);
+    card.setConfig(cfg());
+    const parent = card.parentElement!;
+    card.remove();
+    const hass = fakeHass();
+    assign(card, hass);
+    expect(hass.callWS.callCount).to.equal(0);
+    expect(clock.countTimers()).to.equal(0);
+    parent.append(card);
+    expect(hass.callWS.callCount).to.equal(1);
+    await settle(card);
+    expect(gauges(card)).to.have.length(6);
+    card.remove();
+  });
+
+  it('discards detached old-entity info and immediately fetches missing info on reconnect', async () => {
+    const clock = sinon.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    const hass = fakeHass({ temperature: info.temperature });
+    hass.states['plant.other'] = state();
+    let resolve!: (response: { result: PlantInfo }) => void;
+    hass.callWS.onFirstCall().returns(new Promise(done => { resolve = done; }));
+    const card = await mount(cfg(), hass);
+    const parent = card.parentElement!;
+    card.remove();
+    card.setConfig(cfg({ entity: 'plant.other' }));
+    resolve({ result: info });
     await settle(card);
     expect(gauges(card)).to.have.length(0);
     expect(clock.countTimers()).to.equal(0);
-    await clock.tickAsync(5000);
-    document.body.append(card);
-    await settle(card);
+    parent.append(card);
     expect(hass.callWS.callCount).to.equal(2);
-    expect(gauges(card)).to.have.length(6);
+    expect(hass.callWS.lastCall.args[0].entity_id).to.equal('plant.other');
+    await settle(card);
+    expect(gauges(card)).to.have.length(1);
     card.remove();
   });
 
