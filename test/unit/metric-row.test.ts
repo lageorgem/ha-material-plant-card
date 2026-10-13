@@ -457,12 +457,14 @@ describe('mpl-metric-row graph display', () => {
       stats: null, series, minPoint: { t: start, v: 20.1 }, maxPoint: { t: start + 2 * hour, v: 22.4 },
     });
     const props = graph(el);
-    expect(props.points.map(p => p.f)).to.deep.equal([(20.1 - 20) / 4, null, (22.4 - 20) / 4]);
+    const scale = graphScale([...series.map(p => p.v), measurement.value], measurement.min, measurement.max);
+    expect(props.points.map(p => p.f)).to.deep.equal(series.map(p => scale.map(p.v)));
+    expect(props.points[0].f).to.equal(0);
+    expect(props.points[2].f).to.equal(1);
     for (const point of props.points) if (point.f !== null) expect(point.f).to.be.within(0, 1);
-    expect(props.ticks[0]).to.deep.equal({ f: 0, label: '20' });
-    expect(props.ticks[props.ticks.length - 1]).to.deep.equal({ f: 1, label: '24' });
-    expect(props.thresholdLow).to.equal(-1.25);
-    expect(props.thresholdHigh).to.equal(2.5);
+    expect(props.ticks).to.deep.equal(scale.ticks);
+    expect(props.thresholdLow).to.equal(scale.thresholdLow);
+    expect(props.thresholdHigh).to.equal(scale.thresholdHigh);
   });
 
   it('includes the current measurement in the domain even outside the series', async () => {
@@ -470,10 +472,11 @@ describe('mpl-metric-row graph display', () => {
     const measurement = { ...moisture, value: 40 };
     const el = await graphRow(measurement, { stats: null, series, minPoint: null, maxPoint: null });
     const props = graph(el);
-    const scale = graphScale([20.1, 22.4, 40], measurement.min, measurement.max);
+    const scale = graphScale([...series.map(p => p.v), measurement.value], measurement.min, measurement.max);
     expect(props.points.map(p => p.f)).to.deep.equal(series.map(p => scale.map(p.v)));
     expect(props.ticks).to.deep.equal(scale.ticks);
-    expect(props.ticks[props.ticks.length - 1]).to.deep.equal({ f: 1, label: '40' });
+    expect(props.ticks[props.ticks.length - 1].f).to.equal(scale.map(measurement.value));
+    expect(props.points[props.points.length - 1].f).to.be.lessThan(1);
     expect(props.current).to.deep.equal({ t: start + hour, f: scale.map(22.4), tone: 'problem' });
   });
 
