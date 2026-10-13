@@ -482,7 +482,7 @@ describe('material-plant-card', () => {
       const row = rows(card)[0];
       await row.updateComplete;
       const graph = row.shadowRoot!.querySelector('mpl-history-graph')!;
-      expect(getComputedStyle(row).gridTemplateRows).to.equal('20px 28px 36px');
+      expect(getComputedStyle(row).gridTemplateRows).to.equal('20px 44px 20px');
       expect(row.getBoundingClientRect().height).to.equal(84);
       expect(graph.getBoundingClientRect().height).to.equal(64);
       const summaryRow = rows(card)[1];
