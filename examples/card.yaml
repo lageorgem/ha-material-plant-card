@@ -57,3 +57,11 @@ metrics:
 # Visual editor: Metrics → Add metric, drag to reorder, Edit or Delete.
 # Compact alternative: change display_type above to compact. Metric order,
 # icons and triggers still apply; history/display settings affect full mode only.
+# Uncomment these compact-only options after changing display_type:
+# gauges_per_row: 3
+# gauge_size: 56
+# gauges_per_row: optional integer, 1–12; omit for automatic balanced rows.
+# Requested rows fill left to right; last row is centred. If the card is too
+# narrow, it falls back to automatic rows. Flower-card's bars_per_row is ignored.
+# gauge_size: optional number, 32–96 px (clamped), default 44; icon/value scale.
+# Visual editor: Display type → Compact → Compact layout.

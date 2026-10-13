@@ -119,6 +119,8 @@ Defaults apply when keys are omitted. Only `type` and `entity` are required; eve
 | `entity` | string, required | None | Plant monitor entity; must start with `plant.`. | `plant.orhideea` |
 | `name` | string, optional | Plant friendly name, then entity ID | Override the title; an empty string also falls back. | `Orchid` |
 | `display_type` | `full` or `compact`, optional | `full` | Full shows grouped summary or graph tiles; compact shows circular gauges. Both use the same photo and species header. | `compact` |
+| `gauges_per_row` | integer (1–12), optional | Automatic balanced rows | Compact only: fill rows left to right, centring the last row. Falls back to automatic layout when the requested row cannot fit the card width. | `3` |
+| `gauge_size` | number (32–96 px), optional | `44` | Compact only: dial size in pixels; icon and value text scale with it. Values outside the range are clamped. | `56` |
 | `metrics` | list of metric objects, optional | Entries for moisture, conductivity, temperature, illuminance, humidity and DLI, in that order | Select and configure measurements in display order; see [Per-metric settings](#per-metric-settings). First entry wins for duplicate types; `[]` hides all measurements. Takes precedence over `show_bars`. | `[{type: moisture}, {type: dli, display: graph}]` |
 | `show_bars` | string list, optional | Default measurement order above | Flower-card compatibility: selects measurement types only when `metrics` is absent. Duplicates are removed; `[]` hides all measurements. The editor converts it to `metrics` on the first Metrics-list edit. | `[moisture, temperature, dli]` |
 | `hide_species` | boolean, optional | `false` | Hide species in either mode; does not hide problem summaries. | `true` |
@@ -188,6 +190,8 @@ metrics:
 
 The top fields select the plant, name, battery sensor and display type. Expand **Appearance** to hide species, image or units, override the picture, or set **Battery low below**.
 
+When **Display type** is **Compact**, expand **Compact layout** to set **Gauges per row** and **Gauge size**. Leave Gauges per row empty for automatic balanced rows.
+
 Under **Metrics**, choose **Add metric** from the menu of measurements not already added. Drag a row's handle to change display order, or focus the handle and use the up/down arrow keys. **Edit** opens that entry's icon, display and problem trigger, plus its history window (DLI uses days) and illuminance daylight settings. **Delete** removes the entry without confirmation. Only one entry is expanded at a time. The first list edit converts legacy `show_bars` to `metrics`; editing only the top fields does not.
 
 Release history: [CHANGELOG.md](CHANGELOG.md).
@@ -224,7 +228,7 @@ Illuminance graphs with history windows up to 3 days show golden-hour boundaries
 
 Hover with a mouse, or touch and drag across the graph, to inspect a point's value and time. The vertical hover guide spans the full graph height. The hover bubble stays visible while hovered; **Escape** dismisses it. Touching or hovering the graph does **not** highlight or activate the tile or open more-info; tap the rest of the tile to open the sensor dialog. Problem tiles also show a hover highlight outside the graph; the plant name has a padded hover area.
 
-On every card render, the summary range bar's historical span (including the 24-hour span), current dot and average marker animate in. Graph lines draw from left to right, followed by the min/max markers and current ring. These entry animations are disabled when the browser requests reduced motion.
+The summary range bar's historical span (including the 24-hour span), current dot and average marker retain their entry animations. Graph lines draw from left to right when history first arrives, followed by the min/max markers and current ring; the animation waits for data rather than finishing during loading. Later data updates do not replay the graph entry animation. Reduced motion disables entry animations and motion transitions.
 
 ### Daylight-filtered illuminance
 
@@ -245,6 +249,8 @@ History is always fetched in full mode and refreshes every **10 minutes**. Missi
 ## Reading compact-mode gauges
 
 Icons are centred on the dial. The thick middle band represents the plant's min/max range, including both boundaries. Thin bands on either side represent low and high readings. The coloured fill follows the track: thin in the too-low/too-high zones, thick in the just-right band, with the same gaps between zones. The active arc and dot show the current position; values beyond the gauge's visual extent are clamped at the ends.
+
+When a gauge's value first appears, its active arc sweeps in and its position dot pops into place. Later value updates move the arc and dot smoothly without replaying the entry animation. The browser's reduced-motion preference disables both entry animations and movement transitions.
 
 Illuminance uses a logarithmic scale when the unit is `lx` and the minimum is positive. Other readings use a linear scale. These are range indicators, not percentages of a universal sensor maximum.
 
@@ -323,7 +329,7 @@ type: custom:material-plant-card
 
 Keep the remaining flower-card configuration. `show_bars` works when `metrics` is absent, selecting types with default settings. On the first Metrics-list edit, the visual editor writes an ordered `metrics` list and removes `show_bars`. You can also convert each measurement yourself to an entry such as `{type: moisture}`; see the [before/after example](examples/migrate-from-flower-card.yaml). All settings now live in their metric entries, and summary and graph tiles can be mixed.
 
-`battery_ok_level`, `bars_per_row`, `show_care` and `extra_badges` are accepted and ignored: there is no OK battery threshold, no care panels or extra badges, and gauge layout is automatic. Full remains the default display mode; choose `display_type: compact` for circular gauges. `hide_units` hides units beside full-mode current values and in graph hover bubbles, and complete gauge value text in compact mode. An omitted `battery_warn_level` defaults to 10%.
+`battery_ok_level`, `bars_per_row`, `show_care` and `extra_badges` are accepted and ignored: there is no OK battery threshold, no care panels or extra badges. Use `gauges_per_row`, not `bars_per_row`, to control compact rows. Full remains the default display mode; choose `display_type: compact` for circular gauges. `hide_units` hides units beside full-mode current values and in graph hover bubbles, and complete gauge value text in compact mode. An omitted `battery_warn_level` defaults to 10%.
 
 This is an independent implementation inspired by flower-card; no code is shared.
 
@@ -331,7 +337,19 @@ This is an independent implementation inspired by flower-card; no code is shared
 
 The compact card footprint is approximately **327 × 160 px** at 327 px width with six gauges, versus flower-card's **327 × 203 px**. Full-mode tiles are approximately **84 px** tall; a six-metric full card is approximately **327 × 614 px**. These are measured examples, not fixed heights: measurement count, available width and content affect sizing.
 
-In compact mode, the card measures its width to decide how many gauges fit a row. If they do not fit one row, it balances them across rows, with the extra gauge on the first row and the last row centred. For two-row layouts: five gauges split **3/2**, six **3/3**, and seven **4/3**. At 327 px width, six gauges fit one row. Full mode uses one metric tile per row. `bars_per_row` is ignored in both modes.
+In compact mode, the card measures its width to decide how many gauges fit a row. With `gauges_per_row` omitted, it balances them across rows, with the extra gauge on the first row and the last row centred. For two-row layouts: five gauges split **3/2**, six **3/3**, and seven **4/3**. At the default 44 px gauge size and 327 px card width, six gauges fit one row. Full mode uses one metric tile per row. `bars_per_row` is ignored in both modes.
+
+To choose a compact layout, set optional integer `gauges_per_row` to 1–12 and optional number `gauge_size` to 32–96 px (default 44). Icons and value text scale with the dial. Requested rows fill left to right in metric order, with the last row centred; if the card is too narrow, it falls back to automatic balanced rows.
+
+```yaml
+type: custom:material-plant-card
+entity: plant.orhideea
+display_type: compact
+gauges_per_row: 3
+gauge_size: 56
+```
+
+This gives six available metrics two rows of three, where width permits. Remove `gauges_per_row` to restore automatic balancing. These settings do not affect full mode. Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## Theming
 

@@ -14,6 +14,18 @@ Material 3 Expressive plant monitoring for Home Assistant, using [Olen's plant m
 - Compact has width-aware balanced gauge rows: when two rows are needed, five split 3/2, six 3/3 and seven 4/3, with the last row centred. Its six-gauge footprint is approximately **327 × 160 px** at 327 px width, versus flower-card's **327 × 203 px**. Full-mode tiles are approximately **84 px** tall; a six-metric full card is approximately **327 × 614 px**.
 - Flower-card-compatible configuration: change only the card type. `bars_per_row`, `show_care` and `extra_badges` are accepted but ignored.
 
+### Arrange compact gauges
+
+With `display_type: compact`, the visual editor shows **Compact layout**. Optional integer `gauges_per_row` (1–12, example `3`) fills rows left to right in metric order and centres the last row. Omit it for automatic balanced rows; the card also falls back to automatic layout when the requested row is too wide. Optional number `gauge_size` (32–96 px, default `44`, example `56`) sets the dial size, with icon and value text scaling to match; out-of-range sizes are clamped. These options do not affect full mode. Flower-card's `bars_per_row` remains ignored.
+
+```yaml
+type: custom:material-plant-card
+entity: plant.orhideea
+display_type: compact
+gauges_per_row: 3
+gauge_size: 56
+```
+
 Requires **Home Assistant 2024.8.0+** and the plant monitor custom integration. Install through HACS or add the JavaScript Module resource manually, then add:
 
 ```yaml
@@ -52,7 +64,7 @@ Hover or touch/drag on a graph to see a point's time and value. The vertical hov
 
 Graph vertical scales run from the lowest to the highest plotted value, with gridlines at the minimum, average (dashed) and maximum, labelled on a small left-side y-axis. Ideal bounds are not drawn as guide lines. Illuminance graphs with windows up to 3 days show golden-hour boundaries only when `daylight_only` is enabled: sunrise + offset and sunset − offset, using Home Assistant's configured location. Each has a sunrise/sunset icon above a dashed vertical line. Graph time labels use Home Assistant's configured time zone.
 
-On every card render, the summary range bar's historical span (including the 24-hour span), current dot and average marker animate in. Graph lines draw from left to right, then min/max markers and the current ring appear. Reduced-motion users get no entry animation.
+Compact gauges sweep in their active arc and pop the dot when a value first appears. Subsequent value updates move smoothly without replaying the entry animation. Graph lines draw left to right when history first arrives, then min/max markers and the current ring appear; entry motion waits for data instead of finishing during loading and does not replay on later updates. Summary range bars retain their historical-span, current-dot and average-marker entry animations. Reduced motion disables these animations and movement transitions.
 
 ### Read daylight and DLI history
 
