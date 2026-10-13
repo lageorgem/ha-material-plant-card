@@ -29,6 +29,10 @@ function element(el: MplRangeBar, selector: string): HTMLElement {
   return el.shadowRoot!.querySelector<HTMLElement>(selector)!;
 }
 
+async function finishAnimations(el: MplRangeBar): Promise<void> {
+  await Promise.all(el.shadowRoot!.getAnimations().map(animation => animation.finished));
+}
+
 function box(el: MplRangeBar, selector: string) {
   const host = el.getBoundingClientRect();
   const rect = element(el, selector).getBoundingClientRect();
@@ -114,6 +118,7 @@ describe('mpl-range-bar', () => {
   ]) {
     it(`positions and centres the span from ${from} to ${to}`, async () => {
       const el = await mount(0.5, 'ok', from, to);
+      await finishAnimations(el);
       const rect = box(el, '.span');
       expect(rect.left).to.be.closeTo(left, 0.05);
       expect(rect.width).to.be.closeTo(width, 0.05);
@@ -127,6 +132,7 @@ describe('mpl-range-bar', () => {
   for (const fraction of [-0.1, 0, 0.3, 0.5, 0.6, 1, 1.1]) {
     it(`centres average at ${fraction} and keeps the current dot inside the host`, async () => {
       const el = await mount(fraction, 'ok', 0.3, 0.6, fraction);
+      await finishAnimations(el);
       const avg = box(el, '.avg');
       expect(avg.centre).to.be.closeTo(Math.max(5, Math.min(195, fraction * 200)), 0.05);
       expect(avg.top).to.equal(20);
@@ -205,6 +211,85 @@ describe('mpl-range-bar', () => {
   describe('motion preferences', () => {
     afterEach(async () => { await emulateMedia({ reducedMotion: null }); });
 
+    it('runs staggered entry animations on first mount', async () => {
+      await emulateMedia({ reducedMotion: 'no-preference' });
+      const el = await mount();
+      for (const [selector, name, duration, delay] of [
+        ['.span', 'mpl-span-in', '0.6s', '0s'],
+        ['.dot', 'mpl-dot-in', '0.45s', '0.2s'],
+        ['.avg', 'mpl-avg-in', '0.35s', '0.35s'],
+      ]) {
+        const style = getComputedStyle(element(el, selector));
+        expect(style.animationName).to.equal(name);
+        expect(style.animationDuration).to.equal(duration);
+        expect(style.animationDelay).to.equal(delay);
+        expect(style.animationFillMode).to.equal('both');
+        expect(style.animationTimingFunction).to.equal('cubic-bezier(0.38, 1.21, 0.22, 1)');
+      }
+      expect(el.shadowRoot!.getAnimations()).to.have.length(3);
+      await finishAnimations(el);
+      expect(box(el, '.span').width).to.be.closeTo(60, 0.05);
+      expect(box(el, '.span').left).to.be.closeTo(60, 0.05);
+      expect(box(el, '.dot').centre).to.equal(100);
+      expect(box(el, '.dot').width).to.equal(14);
+      expect(box(el, '.avg').centre).to.equal(90);
+      expect(box(el, '.avg').top).to.equal(20);
+    });
+
+    it('animates history indicators when they arrive without restarting the current dot', async () => {
+      await emulateMedia({ reducedMotion: 'no-preference' });
+      const el = await mount(0.5, 'ok', null, null, null);
+      const dotAnimation = element(el, '.dot').getAnimations()[0];
+      expect(dotAnimation).not.to.equal(undefined);
+      await finishAnimations(el);
+      el.spanFrom = 0.3;
+      el.spanTo = 0.6;
+      el.avg = 0.45;
+      await el.updateComplete;
+      expect(getComputedStyle(element(el, '.span')).animationName).to.equal('mpl-span-in');
+      expect(getComputedStyle(element(el, '.avg')).animationName).to.equal('mpl-avg-in');
+      expect(element(el, '.dot').getAnimations()[0]).to.equal(dotAnimation);
+      expect(dotAnimation.playState).to.equal('finished');
+      expect(element(el, '.span').getAnimations()[0].playState).to.equal('running');
+      expect(element(el, '.avg').getAnimations()[0].playState).to.equal('running');
+      await finishAnimations(el);
+      const entryAnimations = el.shadowRoot!.getAnimations();
+      el.value = 0.7;
+      el.spanTo = 0.8;
+      el.avg = 0.6;
+      await el.updateComplete;
+      for (const animation of entryAnimations) {
+        expect(el.shadowRoot!.getAnimations()).to.include(animation);
+        expect(animation.playState).to.equal('finished');
+      }
+      await finishAnimations(el);
+      expect(box(el, '.dot').centre).to.equal(140);
+      expect(box(el, '.span').width).to.equal(100);
+      expect(box(el, '.avg').centre).to.equal(120);
+    });
+
+    it('restarts entry animations after detaching and re-attaching the host', async () => {
+      await emulateMedia({ reducedMotion: 'no-preference' });
+      const el = await mount();
+      await finishAnimations(el);
+      const previous = el.shadowRoot!.getAnimations();
+      const parent = el.parentElement!;
+      el.remove();
+      expect(el.shadowRoot!.getAnimations()).to.have.length(0);
+      parent.append(el);
+      const restarted = el.shadowRoot!.getAnimations();
+      expect(restarted).to.have.length(3);
+      for (const animation of restarted) {
+        expect(previous).not.to.include(animation);
+        expect(Number(animation.currentTime)).to.be.closeTo(0, 50);
+        expect(animation.playState).to.equal('running');
+      }
+      await finishAnimations(el);
+      expect(box(el, '.dot').centre).to.equal(100);
+      expect(box(el, '.avg').centre).to.equal(90);
+      expect(box(el, '.span').width).to.be.closeTo(60, 0.05);
+    });
+
     it('animates left/width for 500ms and disables transitions under reduced motion', async () => {
       await emulateMedia({ reducedMotion: 'no-preference' });
       const el = await mount();
@@ -219,7 +304,9 @@ describe('mpl-range-bar', () => {
         const style = getComputedStyle(element(el, selector));
         expect(style.transitionProperty).to.equal('none');
         expect(style.transitionDuration).to.equal('0s');
+        expect(style.animationName).to.equal('none');
       }
+      expect(el.shadowRoot!.getAnimations()).to.have.length(0);
     });
   });
 });

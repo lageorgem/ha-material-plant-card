@@ -110,12 +110,15 @@ export class MplRangeBar extends LitElement {
       top: 8px;
       height: 8px;
       border-radius: 4px;
+      transform-origin: center;
+      animation: mpl-span-in 600ms var(--md-sys-motion-expressive-spatial-default, cubic-bezier(0.38, 1.21, 0.22, 1)) both;
     }
     .avg {
       top: 20px;
       width: 10px;
       height: 6px;
       clip-path: polygon(50% 0, 100% 100%, 0 100%);
+      animation: mpl-avg-in 350ms var(--md-sys-motion-expressive-spatial-default, cubic-bezier(0.38, 1.21, 0.22, 1)) 350ms both;
     }
     .dot {
       top: 5px;
@@ -125,6 +128,7 @@ export class MplRangeBar extends LitElement {
       border-radius: 50%;
       background: var(--mpl-range-bar-ring, var(--mpl-surface-container-high));
       border: 3px solid var(--mpl-range-bar-tone);
+      animation: mpl-dot-in 450ms var(--md-sys-motion-expressive-spatial-default, cubic-bezier(0.38, 1.21, 0.22, 1)) 200ms both;
     }
     .dot,
     .span,
@@ -133,11 +137,24 @@ export class MplRangeBar extends LitElement {
         left 500ms var(--md-sys-motion-expressive-spatial-default, cubic-bezier(0.38, 1.21, 0.22, 1)),
         width 500ms var(--md-sys-motion-expressive-spatial-default, cubic-bezier(0.38, 1.21, 0.22, 1));
     }
+    @keyframes mpl-span-in {
+      from { transform: scaleX(0); opacity: 0; }
+      to { transform: scaleX(1); opacity: 1; }
+    }
+    @keyframes mpl-dot-in {
+      from { transform: scale(0); }
+      to { transform: scale(1); }
+    }
+    @keyframes mpl-avg-in {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: none; }
+    }
     @media (prefers-reduced-motion: reduce) {
       .dot,
       .span,
       .avg {
         transition: none;
+        animation: none;
       }
     }
   `;
