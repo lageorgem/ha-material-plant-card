@@ -464,7 +464,7 @@ function t(t,e,i,s){var o,r=arguments.length,n=r<3?e:null===s?s=Object.getOwnPro
       z-index: 1;
     }
   `,t([mt({attribute:!1})],he.prototype,"points",void 0),t([mt({attribute:!1})],he.prototype,"ticks",void 0),t([mt({type:Number})],he.prototype,"start",void 0),t([mt({type:Number})],he.prototype,"end",void 0),t([mt({attribute:!1})],he.prototype,"minMarker",void 0),t([mt({attribute:!1})],he.prototype,"maxMarker",void 0),t([mt({attribute:!1})],he.prototype,"current",void 0),t([mt({attribute:!1})],he.prototype,"thresholdLow",void 0),t([mt({attribute:!1})],he.prototype,"thresholdHigh",void 0),t([mt({attribute:!1})],he.prototype,"events",void 0),t([mt()],he.prototype,"summary",void 0),t([gt()],he.prototype,"_width",void 0),t([gt()],he.prototype,"_hoverIndex",void 0),t([gt()],he.prototype,"_mouseBubble",void 0),customElements.get("mpl-history-graph")||customElements.define("mpl-history-graph",he);const ce=t=>Ft(t,"",!0),pe={"mol/d⋅m²":"mol/d","mol/d·m²":"mol/d","mol/(d⋅m²)":"mol/d"};function de(t,e,i="last 24 h"){return It(t)+(e?` · ${i} ${ce(e.min)}–${ce(e.max)}, average ${ce(e.mean)}`:"")}class ue extends ct{constructor(){super(...arguments),this.tone="unknown",this.history=null,this.events=[],this.display="summary",this.daily=!1,this.periodText="today",this.hideUnits=!1,this.showHistory=!0,this.periodLabel="Today"}render(){const t=this.measurement;if(!t)return K;const e=this.history?.stats??null,i=e=>Ot(e,t.min,t.max,t.unit),s=Lt(e?.mean??null,t.min,t.max),o=(e,i)=>{const s=Lt(i,t.min,t.max);return G`<span class=${"low"===s||"high"===s?"stat out":"stat"}>
-        <span class="stat-label">${e}</span><span class="stat-value">${null===i?"—":Nt(i)}</span>
+        <span class="stat-label">${e}</span><span class="stat-value">${null===i?"—":Ft(i,"",!0)}</span>
       </span>`};return G`
       <div class="title">
         <ha-icon icon=${t.icon} aria-hidden="true"></ha-icon>
@@ -515,9 +515,9 @@ function t(t,e,i,s){var o,r=arguments.length,n=r<3?e:null===s?s=Object.getOwnPro
       --mpl-metric-period-line: 16px;
       --mpl-metric-stat-size: 11px;
       --mpl-metric-stat-line: 16px;
-      --mpl-metric-stat-gap: 3px;
+      --mpl-metric-stat-gap: 2px;
       --mpl-metric-stats-gap: 4px;
-      --mpl-metric-stat-padding: 6px;
+      --mpl-metric-stat-padding: 4px;
       --mpl-metric-stat-radius: 6px;
       --mpl-metric-stat-label-weight: 400;
       --mpl-metric-stat-value-weight: 600;
