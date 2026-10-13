@@ -241,13 +241,59 @@ describe('mpl-history-graph', () => {
 
   it('starts drawing when data arrives after an empty graph has mounted', async () => {
     const el = await mount([]);
+    el.minMarker = { t: 75, f: 0.1, ok: false };
+    el.maxMarker = { t: 0, f: 0.9, ok: false };
+    el.current = { t: 100, f: 0.6, tone: 'ok' };
+    await el.updateComplete;
+    const shapes = '.history-line, .isolated-point, .min-marker, .max-marker, .min-dot, .max-dot, .current-ring';
+    expect(el.shadowRoot!.querySelector(shapes)).to.equal(null);
+    el.points = [{ t: 50, f: null, label: 'Gap' }];
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector(shapes)).to.equal(null);
+    el.points = [...points, { t: 110, f: null, label: 'Gap' }, { t: 120, f: 0.5, label: 'Isolated' }];
+    await el.updateComplete;
     const line = node(el, '.history-line');
-    expect(line.getAnimations()).to.deep.equal([]);
-    el.points = points;
+    expect(getComputedStyle(line).animationName).to.equal('mpl-line-draw');
+    const animation = line.getAnimations()[0];
+    expect(animation).not.to.equal(undefined);
+    expect(animation.playState).to.equal('running');
+    expect(Number(animation.currentTime)).to.be.lessThan(Number(animation.effect!.getTiming().duration));
+    const isolated = node(el, '.isolated-point');
+    expect(getComputedStyle(isolated).animationDelay).to.equal('0.3s');
+    const markers = [...el.shadowRoot!.querySelectorAll('.min-marker, .max-marker, .min-dot, .max-dot, .current-ring')];
+    expect(markers.length).to.equal(5);
+    for (const marker of markers) {
+      expect(marker.getAnimations()[0]).not.to.equal(undefined);
+      expect(marker.getAnimations()[0].playState).to.equal('running');
+      expect(getComputedStyle(marker).animationDelay).to.equal('0.7s');
+      expect(getComputedStyle(marker).opacity).to.equal('0');
+    }
+    for (const shape of [line, isolated, ...markers]) {
+      const animations = shape.getAnimations();
+      expect(animations.length).to.equal(1);
+      animations.forEach(item => item.finish());
+    }
+    el.points = el.points.map(point => ({ ...point, f: point.f === null ? null : point.f + 0.01 }));
+    el.current = { ...el.current, f: 0.7 };
+    pointer(el, 'pointermove', 60);
     await el.updateComplete;
     expect(node(el, '.history-line')).to.equal(line);
-    expect(getComputedStyle(line).animationName).to.equal('mpl-line-draw');
-    expect(line.getAnimations()[0].playState).to.equal('running');
+    expect(line.getAnimations()).to.deep.equal([animation]);
+    expect(animation.playState).to.equal('finished');
+    expect([...el.shadowRoot!.querySelectorAll('.min-marker, .max-marker, .min-dot, .max-dot, .current-ring')])
+      .to.deep.equal(markers);
+
+    el.points = [];
+    await el.updateComplete;
+    expect(el.shadowRoot!.querySelector(shapes)).to.equal(null);
+    el.points = points;
+    await el.updateComplete;
+    const restarted = node(el, '.history-line');
+    expect(restarted).not.to.equal(line);
+    expect(restarted.getAnimations()[0]).not.to.equal(undefined);
+    expect(restarted.getAnimations()[0]).not.to.equal(animation);
+    expect(restarted.getAnimations()[0].playState).to.equal('running');
+    expect(Number(restarted.getAnimations()[0].currentTime)).to.be.lessThan(900);
   });
 
   it('registers, exposes its summary, and renders an empty graph without ideal guides', async () => {
@@ -259,7 +305,7 @@ describe('mpl-history-graph', () => {
     expect(el.getBoundingClientRect().width).to.equal(240);
     expect(getComputedStyle(el).touchAction).to.equal('pan-y');
     expect(getComputedStyle(el).cursor).to.equal('crosshair');
-    expect(node(el, '.history-line').getAttribute('d')).to.equal('');
+    expect(el.shadowRoot!.querySelector('.history-line')).to.equal(null);
     el.summary = 'Updated summary';
     await el.updateComplete;
     expect(el.getAttribute('aria-label')).to.equal('Updated summary');

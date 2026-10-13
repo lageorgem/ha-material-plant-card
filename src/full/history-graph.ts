@@ -1,5 +1,6 @@
 import { LitElement, html, svg, css, nothing, type TemplateResult } from 'lit';
 import { property, state } from 'lit/decorators.js';
+import { keyed } from 'lit/directives/keyed.js';
 import type { GaugeTone } from '../types';
 
 export interface GraphPoint { t: number; f: number | null; label: string; }
@@ -46,6 +47,8 @@ export class MplHistoryGraph extends LitElement {
   private _frame?: number;
   private _hideTimer?: ReturnType<typeof setTimeout>;
   private _pressedPointer?: number;
+  private _hasData = false;
+  private _dataEpoch = 0;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -206,6 +209,13 @@ export class MplHistoryGraph extends LitElement {
     return point?.f !== null ? point : undefined;
   }
 
+  protected willUpdate(): void {
+    const hasData = this.points.some(point => point.f !== null);
+    // Only a new populated series restarts entry motion, never refreshes or hover.
+    if (hasData && !this._hasData) this._dataEpoch++;
+    this._hasData = hasData;
+  }
+
   protected updated(): void {
     this.setAttribute('aria-label', this.summary);
     const point = this._hoverPoint();
@@ -279,6 +289,7 @@ export class MplHistoryGraph extends LitElement {
             dominant-baseline="central">${tick.label}</text>` : nothing}`)}
         ${events.map(event => svg`<line class="event-line" x1=${this._x(event.t)} x2=${this._x(event.t)}
           y1=${band} y2=${GRAPH_HEIGHT} stroke="var(--mpl-outline)" stroke-width="1" stroke-dasharray="3 3" opacity="1"></line>`)}
+        ${this._hasData ? keyed(this._dataEpoch, svg`
         <path class="history-line" pathLength="1" d=${path.trim()} fill="none" stroke=${gradient} stroke-width="2"
           stroke-linecap="round" stroke-linejoin="round"></path>
         ${isolated.map(point => svg`<circle class="isolated-point" cx=${this._x(point.t)} cy=${y(point.f!)}
@@ -288,7 +299,8 @@ export class MplHistoryGraph extends LitElement {
         ${current && current.tone !== 'unknown' ? svg`<circle class="current-ring"
           cx=${this._x(current.t)} cy=${y(current.f)} r="3.5"
           fill="var(--mpl-range-bar-ring, var(--mpl-surface-container-high))"
-          stroke=${currentColour} stroke-width="2"></circle>` : nothing}
+           stroke=${currentColour} stroke-width="2"></circle>` : nothing}
+        `) : nothing}
         ${hover ? svg`
           <line class="hover-guide" x1=${this._x(hover.t)} x2=${this._x(hover.t)} y1="0" y2=${GRAPH_HEIGHT}
             stroke="var(--mpl-on-surface-variant)" stroke-width="1" opacity="0.4"></line>
