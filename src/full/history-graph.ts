@@ -5,6 +5,7 @@ import type { GaugeTone } from '../types';
 export interface GraphPoint { t: number; f: number | null; label: string; }
 export interface GraphMarker { t: number; f: number; ok: boolean; }
 export interface GraphCurrent { t: number; f: number; tone: GaugeTone; }
+export interface GraphTick { f: number; label: string; }
 
 export const GRAPH_HEIGHT = 64;
 export const ICON_BAND = 14;
@@ -12,17 +13,20 @@ export const MARKER_W = 6;
 export const MARKER_H = 4;
 export const MARKER_GAP = 1.5;
 export const PLOT_PAD = 8;
+export const AXIS_W = 26;
 const DOT_RADIUS = 2;
 const ICON_SIZE = 12;
 const yBottom = GRAPH_HEIGHT - PLOT_PAD;
 const colour = (fraction: number, low: number | null, high: number | null): string =>
-  (low !== null && fraction < low) || (high !== null && fraction > high)
+  low === null || high === null ? 'var(--mpl-on-surface-variant)'
+    : fraction < low || fraction > high
     ? 'var(--mpl-error)' : 'var(--mpl-success)';
 let nextGradientId = 0;
 
 /** Caller-mapped fraction history; semantic theme tokens inherit from the card. */
 export class MplHistoryGraph extends LitElement {
   @property({ attribute: false }) points: GraphPoint[] = [];
+  @property({ attribute: false }) ticks: GraphTick[] = [];
   @property({ type: Number }) start = 0;
   @property({ type: Number }) end = 0;
   @property({ attribute: false }) minMarker: GraphMarker | null = null;
@@ -95,10 +99,14 @@ export class MplHistoryGraph extends LitElement {
     window.removeEventListener('pointercancel', this._release);
   }
 
+  private get _plotLeft(): number { return this.ticks.length > 0 ? AXIS_W : 0; }
+
+  private get _plotWidth(): number { return Math.max(0, this._width - this._plotLeft); }
+
   private _x(t: number): number {
     const duration = this.end - this.start;
-    if (!(duration > 0)) return 0;
-    return Math.max(0, Math.min(this._width, (t - this.start) / duration * this._width));
+    if (!(duration > 0)) return this._plotLeft;
+    return this._plotLeft + Math.max(0, Math.min(this._plotWidth, (t - this.start) / duration * this._plotWidth));
   }
 
   private _clearHideTimer(): void {
@@ -205,7 +213,7 @@ export class MplHistoryGraph extends LitElement {
     const bubble = this.shadowRoot?.querySelector<HTMLElement>('.bubble');
     if (!point || !bubble) return;
     const width = bubble.getBoundingClientRect().width;
-    const left = Math.max(0, Math.min(this._width - width, this._x(point.t) - width / 2));
+    const left = Math.max(this._plotLeft, Math.min(this._width - width, this._x(point.t) - width / 2));
     bubble.style.left = `${left}px`;
   }
 
@@ -213,7 +221,7 @@ export class MplHistoryGraph extends LitElement {
     if (!marker) return nothing;
     const x = this._x(marker.t);
     // Only the triangle is clamped horizontally; its dot remains on the series point.
-    const triangleX = Math.max(MARKER_W / 2, Math.min(this._width - MARKER_W / 2, x));
+    const triangleX = Math.max(this._plotLeft + MARKER_W / 2, Math.min(this._width - MARKER_W / 2, x));
     const direction = kind === 'min' ? 1 : -1;
     const tip = y(marker.f) + direction * (MARKER_GAP + DOT_RADIUS);
     const base = tip + direction * MARKER_H;
@@ -241,6 +249,8 @@ export class MplHistoryGraph extends LitElement {
     const gradient = `url(#${this._gradientId})`;
     const low = this.thresholdLow;
     const high = this.thresholdHigh;
+    const knownThresholds = low !== null && high !== null;
+    const offset = (fraction: number): number => Math.max(0, Math.min(1, y(fraction) / GRAPH_HEIGHT));
     const hover = this._hoverPoint();
     const current = this.current;
     const currentColour = current?.tone === 'problem' ? 'var(--mpl-error)'
@@ -250,18 +260,20 @@ export class MplHistoryGraph extends LitElement {
       <svg width=${this._width} height=${GRAPH_HEIGHT} aria-hidden="true" focusable="false">
         <defs>
           <linearGradient id=${this._gradientId} gradientUnits="userSpaceOnUse" x1="0" x2="0" y1="0" y2=${GRAPH_HEIGHT}>
-            <stop offset="0" stop-color=${high === null ? 'var(--mpl-success)' : 'var(--mpl-error)'}></stop>
-            ${high !== null ? svg`
-              <stop offset=${y(high) / GRAPH_HEIGHT} stop-color="var(--mpl-error)"></stop>
-              <stop offset=${y(high) / GRAPH_HEIGHT} stop-color="var(--mpl-success)"></stop>` : nothing}
-            ${low !== null ? svg`
-              <stop offset=${y(low) / GRAPH_HEIGHT} stop-color="var(--mpl-success)"></stop>
-              <stop offset=${y(low) / GRAPH_HEIGHT} stop-color="var(--mpl-error)"></stop>` : nothing}
-            <stop offset="1" stop-color=${low === null ? 'var(--mpl-success)' : 'var(--mpl-error)'}></stop>
+            <stop offset="0" stop-color=${colour(1, low, high)}></stop>
+            ${knownThresholds && high >= 0 && high <= 1 ? svg`
+              <stop offset=${offset(high)} stop-color="var(--mpl-error)"></stop>
+              <stop offset=${offset(high)} stop-color="var(--mpl-success)"></stop>` : nothing}
+            ${knownThresholds && low >= 0 && low <= 1 ? svg`
+              <stop offset=${offset(low)} stop-color="var(--mpl-success)"></stop>
+              <stop offset=${offset(low)} stop-color="var(--mpl-error)"></stop>` : nothing}
+            <stop offset="1" stop-color=${colour(0, low, high)}></stop>
           </linearGradient>
         </defs>
-        ${[high, low].filter(f => f !== null).map(f => svg`<line class="threshold-guide" x1="0" x2=${this._width}
-          y1=${y(f)} y2=${y(f)} stroke="var(--mpl-outline)" opacity="1" stroke-width="1" stroke-dasharray="3 3"></line>`)}
+        ${this.ticks.map(tick => svg`<line class="gridline" x1=${this._plotLeft} x2=${this._width}
+          y1=${y(tick.f)} y2=${y(tick.f)} stroke="var(--mpl-outline-variant)" stroke-width="1" opacity="0.6"></line>
+          <text class="tick-label" x=${AXIS_W - 4} y=${y(tick.f)} text-anchor="end"
+            dominant-baseline="central">${tick.label}</text>`)}
         ${events.map(event => svg`<line class="event-line" x1=${this._x(event.t)} x2=${this._x(event.t)}
           y1=${band} y2=${GRAPH_HEIGHT} stroke="var(--mpl-outline)" stroke-width="1" stroke-dasharray="3 3" opacity="1"></line>`)}
         <path class="history-line" pathLength="1" d=${path.trim()} fill="none" stroke=${gradient} stroke-width="2"
@@ -281,8 +293,9 @@ export class MplHistoryGraph extends LitElement {
         ` : nothing}
       </svg>
       ${events.map(event => html`<ha-icon class="event-icon" icon=${event.icon} aria-hidden="true"
-        style=${`left: ${Math.max(0, Math.min(this._width - ICON_SIZE, this._x(event.t) - ICON_SIZE / 2))}px`}></ha-icon>`)}
+        style=${`left: ${Math.max(this._plotLeft, Math.min(this._width - ICON_SIZE, this._x(event.t) - ICON_SIZE / 2))}px`}></ha-icon>`)}
       ${hover ? html`<div class=${this._mouseBubble ? 'bubble mouse-bubble' : 'bubble'} aria-hidden="true"
+        style=${`max-width: ${this._plotWidth}px`}
         @pointerenter=${this._bubbleEnter} @pointerleave=${this._bubbleLeave}>${hover.label}</div>` : nothing}
     `;
   }
@@ -297,6 +310,11 @@ export class MplHistoryGraph extends LitElement {
       cursor: crosshair;
     }
     svg { display: block; overflow: visible; }
+    .tick-label {
+      font-size: 9px;
+      fill: var(--mpl-on-surface-variant);
+      font-variant-numeric: tabular-nums;
+    }
     .history-line:not([d=""]) {
       stroke-dasharray: 1;
       animation: mpl-line-draw 900ms cubic-bezier(0.2, 0, 0, 1) both;

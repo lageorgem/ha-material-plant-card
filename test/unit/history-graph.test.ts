@@ -49,6 +49,83 @@ function bubbleInside(el: MplHistoryGraph): void {
 }
 
 describe('mpl-history-graph', () => {
+  it('reserves a tick gutter and draws labelled gridlines below events and the series', async () => {
+    const el = await mount();
+    el.ticks = [{ f: 0, label: '10' }, { f: 0.5, label: '20' }, { f: 1, label: '30' }];
+    el.events = [{ t: 0, icon: 'mdi:water' }, { t: 50, icon: 'mdi:water' }];
+    await el.updateComplete;
+    expect(node(el, '.history-line').getAttribute('d')).to.match(/^M26,/);
+    const gridlines = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.gridline')];
+    const labels = [...el.shadowRoot!.querySelectorAll<SVGTextElement>('.tick-label')];
+    expect(gridlines.length).to.equal(3);
+    expect(labels.map(label => label.textContent)).to.deep.equal(['10', '20', '30']);
+    for (const [index, y] of [56, 39, 22].entries()) {
+      const line = gridlines[index];
+      expect([line.x1.baseVal.value, line.x2.baseVal.value]).to.deep.equal([26, 240]);
+      expect([line.y1.baseVal.value, line.y2.baseVal.value]).to.deep.equal([y, y]);
+      const style = getComputedStyle(line);
+      expect(style.stroke).to.equal('rgb(100, 110, 120)');
+      expect(style.strokeWidth).to.equal('1px');
+      expect(style.strokeDasharray).to.equal('none');
+      expect(style.opacity).to.equal('0.6');
+      expect(line.compareDocumentPosition(node(el, '.event-line')) & Node.DOCUMENT_POSITION_FOLLOWING).not.to.equal(0);
+      expect(line.compareDocumentPosition(node(el, '.history-line')) & Node.DOCUMENT_POSITION_FOLLOWING).not.to.equal(0);
+      const label = labels[index];
+      expect(label.getAttribute('x')).to.equal('22');
+      expect(label.getAttribute('y')).to.equal(String(y));
+      expect(label.getAttribute('text-anchor')).to.equal('end');
+      expect(label.getAttribute('dominant-baseline')).to.equal('central');
+      expect(getComputedStyle(label).fontSize).to.equal('9px');
+      expect(getComputedStyle(label).fill).to.equal('rgb(70, 80, 90)');
+      expect(getComputedStyle(label).fontVariantNumeric).to.equal('tabular-nums');
+    }
+    el.events = [];
+    await el.updateComplete;
+    expect(gridlines.map(line => line.y1.baseVal.value)).to.deep.equal([56, 32, 8]);
+    el.ticks = [];
+    await el.updateComplete;
+    expect(node(el, '.history-line').getAttribute('d')).to.match(/^M0,/);
+    expect(el.shadowRoot!.querySelector('.gridline, .tick-label, .threshold-guide')).to.equal(null);
+  });
+
+  it('maps markers, current, events, scrubbing and bubble clamps into the plot range', async () => {
+    const el = await mount();
+    el.ticks = [{ f: 0, label: '0' }];
+    el.minMarker = { t: 0, f: 0.1, ok: false };
+    el.maxMarker = { t: 100, f: 0.9, ok: false };
+    el.current = { t: 50, f: 0.5, tone: 'ok' };
+    el.events = [{ t: 0, icon: 'mdi:water' }, { t: 50, icon: 'mdi:water' }, { t: 100, icon: 'mdi:water' }];
+    await el.updateComplete;
+    expect(node<SVGCircleElement>(el, '.min-dot').cx.baseVal.value).to.equal(26);
+    expect(node<SVGPolygonElement>(el, '.min-marker').points.getItem(1).x).to.equal(26);
+    expect(node<SVGPolygonElement>(el, '.max-marker').points.getItem(2).x).to.equal(240);
+    expect(node<SVGCircleElement>(el, '.current-ring').cx.baseVal.value).to.equal(133);
+    expect([...el.shadowRoot!.querySelectorAll<SVGLineElement>('.event-line')].map(line => line.x1.baseVal.value))
+      .to.deep.equal([26, 133, 240]);
+    expect([...el.shadowRoot!.querySelectorAll<HTMLElement>('.event-icon')].map(icon => parseFloat(icon.style.left)))
+      .to.deep.equal([26, 127, 228]);
+    pointer(el, 'pointermove', 105);
+    await el.updateComplete;
+    expect(node(el, '.bubble').textContent).to.equal('Middle');
+    expect(node<SVGCircleElement>(el, '.hover-dot').cx.baseVal.value).to.equal(79.5);
+    for (const x of [26, 240]) {
+      pointer(el, 'pointerdown', x, 'touch');
+      await el.updateComplete;
+      expect(node<SVGLineElement>(el, '.hover-guide').x1.baseVal.value).to.equal(x);
+      const host = el.getBoundingClientRect();
+      const bubble = node<HTMLElement>(el, '.bubble').getBoundingClientRect();
+      expect(bubble.left).to.be.at.least(host.left + 26);
+      expect(bubble.right).to.be.at.most(host.right);
+    }
+    el.points = [{ t: 0, f: 0.5, label: 'Long label '.repeat(100) }];
+    pointer(el, 'pointermove', 26, 'touch');
+    await el.updateComplete;
+    expect(node<HTMLElement>(el, '.bubble').getBoundingClientRect().width).to.equal(214);
+    el.end = 0;
+    await el.updateComplete;
+    expect(node(el, '.history-line').getAttribute('d')).to.match(/^M26,/);
+  });
+
   it('draws the line and fades isolated points before bringing in markers and the current ring', async () => {
     const el = await mount([
       ...points, { t: 110, f: null, label: 'Gap' }, { t: 120, f: 0.5, label: 'Isolated' },
@@ -76,7 +153,7 @@ describe('mpl-history-graph', () => {
       expect(style.transformBox).to.equal('fill-box');
       expect(style.opacity).to.equal('0');
     }
-    for (const selector of ['.threshold-guide', '.event-line', '.event-icon', '.hover-guide', '.hover-dot', '.bubble']) {
+    for (const selector of ['.event-line', '.event-icon', '.hover-guide', '.hover-dot', '.bubble']) {
       expect(getComputedStyle(node(el, selector)).animationName).to.equal('none');
     }
     const animations = [line, isolated, ...markers].flatMap(shape => shape.getAnimations());
@@ -132,7 +209,7 @@ describe('mpl-history-graph', () => {
     expect(line.getAnimations()[0].playState).to.equal('running');
   });
 
-  it('registers, exposes its summary, and renders an empty graph with guides', async () => {
+  it('registers, exposes its summary, and renders an empty graph without ideal guides', async () => {
     const el = await mount([]);
     expect(customElements.get('mpl-history-graph')).to.equal(MplHistoryGraph);
     expect(el.getAttribute('role')).to.equal('img');
@@ -146,16 +223,7 @@ describe('mpl-history-graph', () => {
     await el.updateComplete;
     expect(el.getAttribute('aria-label')).to.equal('Updated summary');
     const guides = el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide');
-    expect(guides.length).to.equal(2);
-     for (const [index, y] of [17.6, 46.4].entries()) {
-      expect(guides[index].y1.baseVal.value).to.be.closeTo(y, 0.001);
-      expect(guides[index].y2.baseVal.value).to.be.closeTo(y, 0.001);
-      expect(guides[index].x2.baseVal.value).to.equal(240);
-      expect(guides[index].getAttribute('stroke')).to.equal('var(--mpl-outline)');
-      expect(getComputedStyle(guides[index]).stroke).to.equal('rgb(155, 143, 128)');
-      expect(getComputedStyle(guides[index]).opacity).to.equal('1');
-      expect(guides[index].getAttribute('stroke-dasharray')).to.equal('3 3');
-    }
+    expect(guides.length).to.equal(0);
   });
 
   it('breaks at nulls and uses pixel units and an inherited hard-stop gradient', async () => {
@@ -254,8 +322,7 @@ describe('mpl-history-graph', () => {
        await el.updateComplete;
        expect(node(el, '.history-line').getAttribute('d')).to.equal('M0,8 L240,56');
        const guides = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')];
-       expect(guides.map(guide => guide.y1.baseVal.value)).to.deep.equal([8, 56]);
-       expect(guides.map(guide => guide.y2.baseVal.value)).to.deep.equal([8, 56]);
+        expect(guides).to.deep.equal([]);
        expect(el.shadowRoot!.querySelector('.event-icon, .event-line')).to.equal(null);
      }
      el.events = [{ t: 0, icon: 'mdi:weather-sunset-up' }];
@@ -283,7 +350,7 @@ describe('mpl-history-graph', () => {
         expect(host.height).to.equal(64);
         expect(node(el, '.history-line').getAttribute('d')).to.equal('M0,22 L240,56');
         expect([...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')]
-          .map(guide => guide.y1.baseVal.value)).to.deep.equal([22, 56]);
+           .map(guide => guide.y1.baseVal.value)).to.deep.equal([]);
        for (const shape of el.shadowRoot!.querySelectorAll<SVGGraphicsElement>(
          '.history-line, .threshold-guide, .event-line, .min-marker, .max-marker, .min-dot, .max-dot, .current-ring, .hover-dot',
        )) {
@@ -327,8 +394,8 @@ describe('mpl-history-graph', () => {
      });
    }
 
-   for (const [low, high] of [[0.2, 0.8], [0.92, null], [null, 0.08], [null, null]] as const) {
-    it(`uses configurable threshold guides and paint for (${low}, ${high})`, async () => {
+    for (const [low, high] of [[0.3, 0.7], [-0.5, 1.4], [1.2, 1.5], [-1.5, -1.2], [0.92, null], [null, 0.08], [null, null]] as const) {
+     it(`uses arbitrary threshold paint without ideal guides for (${low}, ${high})`, async () => {
       const el = await mount([
         { t: 0, f: 0.04, label: 'Below' }, { t: 25, f: null, label: 'Gap' },
         { t: 50, f: 0.5, label: 'Middle' }, { t: 75, f: null, label: 'Gap' },
@@ -337,20 +404,18 @@ describe('mpl-history-graph', () => {
       el.thresholdLow = low;
       el.thresholdHigh = high;
       await el.updateComplete;
-       const ys = [high, low].filter(f => f !== null).map(f => 56 - f * 48);
-      const guides = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')];
-      expect(guides.length).to.equal(ys.length);
-      for (const [index, guide] of guides.entries()) {
-        expect(guide.y1.baseVal.value).to.be.closeTo(ys[index], 0.001);
-        expect(guide.y2.baseVal.value).to.be.closeTo(ys[index], 0.001);
-      }
-      expect(guides.every(guide => guide.x2.baseVal.value === 240)).to.equal(true);
-      const success = 'rgb(10, 20, 30)';
-      const error = 'rgb(40, 50, 60)';
-      const expected: [number, string][] = [[0, high === null ? success : error]];
-       if (high !== null) expected.push([(56 - high * 48) / 64, error], [(56 - high * 48) / 64, success]);
-       if (low !== null) expected.push([(56 - low * 48) / 64, success], [(56 - low * 48) / 64, error]);
-      expected.push([1, low === null ? success : error]);
+       const guides = [...el.shadowRoot!.querySelectorAll<SVGLineElement>('.threshold-guide')];
+       expect(guides.length).to.equal(0);
+       const success = 'rgb(10, 20, 30)';
+       const error = 'rgb(40, 50, 60)';
+       const paintAt = (f: number) => low === null || high === null ? 'rgb(70, 80, 90)'
+         : f < low || f > high ? error : success;
+       const expected: [number, string][] = [[0, paintAt(1)]];
+       if (low !== null && high !== null) {
+         if (high >= 0 && high <= 1) expected.push([(56 - high * 48) / 64, error], [(56 - high * 48) / 64, success]);
+         if (low >= 0 && low <= 1) expected.push([(56 - low * 48) / 64, success], [(56 - low * 48) / 64, error]);
+       }
+       expected.push([1, paintAt(0)]);
       const stops = [...node(el, 'linearGradient').querySelectorAll('stop')];
       expect(stops.map(stop => [Number(stop.getAttribute('offset')), getComputedStyle(stop).stopColor]))
         .to.deep.equal(expected);
@@ -363,12 +428,12 @@ describe('mpl-history-graph', () => {
         pointer(el, 'pointermove', x);
         await el.updateComplete;
         expect(getComputedStyle(node(el, '.hover-dot')).fill)
-          .to.equal((low !== null && f < low) || (high !== null && f > high) ? error : success);
+           .to.equal(paintAt(f));
       }
     });
   }
 
-  it('matches event lines to horizontal guides beneath the history with clamped icons above them', async () => {
+  it('draws event lines beneath the history with clamped icons above them', async () => {
     const el = await mount();
     expect(el.shadowRoot!.querySelector('.event-line, .event-icon')).to.equal(null);
     el.events = [
@@ -384,7 +449,6 @@ describe('mpl-history-graph', () => {
     expect(lines.length).to.equal(3);
     expect(icons.length).to.equal(3);
     const host = el.getBoundingClientRect();
-    const guideStyle = getComputedStyle(node(el, '.threshold-guide'));
     for (const [index, x] of [0, 120, 240].entries()) {
       const line = lines[index];
       expect(line.x1.baseVal.value).to.equal(x);
@@ -392,10 +456,10 @@ describe('mpl-history-graph', () => {
        expect(line.y1.baseVal.value).to.equal(14);
        expect(line.y2.baseVal.value).to.equal(64);
       const lineStyle = getComputedStyle(line);
-      expect(lineStyle.stroke).to.equal(guideStyle.stroke);
-      expect(lineStyle.strokeDasharray).to.equal(guideStyle.strokeDasharray);
-      expect(lineStyle.strokeWidth).to.equal(guideStyle.strokeWidth);
-      expect(lineStyle.opacity).to.equal(guideStyle.opacity);
+      expect(lineStyle.stroke).to.equal('rgb(155, 143, 128)');
+      expect(lineStyle.strokeDasharray).to.equal('3px, 3px');
+      expect(lineStyle.strokeWidth).to.equal('1px');
+      expect(lineStyle.opacity).to.equal('1');
       expect(line.compareDocumentPosition(node(el, '.history-line')) & Node.DOCUMENT_POSITION_FOLLOWING).not.to.equal(0);
       const icon = icons[index];
       expect(icon.tagName.toLowerCase()).to.equal('ha-icon');
