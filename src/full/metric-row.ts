@@ -143,6 +143,8 @@ export class MplMetricRow extends LitElement {
       --mpl-metric-stat-label-weight: 400;
       --mpl-metric-stat-value-weight: 600;
       display: grid;
+      container-type: inline-size;
+      container-name: mpl-metric;
       grid-template-columns: var(--mpl-metric-column-width) minmax(0, 1fr);
       grid-template-rows: var(--mpl-metric-label-line) var(--mpl-metric-value-line) var(--mpl-metric-caption-line);
       column-gap: var(--mpl-metric-column-gap);
@@ -254,6 +256,16 @@ export class MplMetricRow extends LitElement {
       gap: var(--mpl-metric-stats-gap);
       align-items: center;
       min-width: 0;
+    }
+    /* Chromium: widest chips 159.55px + 88px column + 12px gap; round up to 264px. */
+    @container mpl-metric (width < 264px) {
+      :host([display='summary']) .ideal {
+        display: none;
+      }
+      :host([display='summary']) .stats {
+        grid-column: 1 / -1;
+        justify-content: center;
+      }
     }
     .stat {
       display: inline-flex;

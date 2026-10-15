@@ -34,6 +34,88 @@ function badges(el: MplMetricRow): HTMLElement[] {
   return Array.from(el.shadowRoot!.querySelectorAll<HTMLElement>('.stat'));
 }
 
+const narrowStats = [
+  { key: 'moisture', unit: '%', min: 65, mean: 73.1, max: 100 },
+  { key: 'temperature', unit: '°C', min: 17.7, mean: 20.2, max: 27.1 },
+  { key: 'illuminance', unit: 'lx', min: 828, mean: 15000, max: 89000 },
+  { key: 'humidity', unit: '%', min: 27.5, mean: 47.2, max: 51.2 },
+  { key: 'dli', unit: 'mol/d⋅m²', min: 0.65, mean: 3.58, max: 7.72 },
+  { key: 'conductivity', unit: 'µS/cm', min: 350, mean: 1250, max: 2400 },
+];
+
+async function fixedWidthRow(width: number, scenario: typeof narrowStats[number], display = 'summary') {
+  const wrapper = await fixture<HTMLElement>(html`
+    <div style=${`width: ${width}px; font-family: Arial, sans-serif`}>
+      <mpl-metric-row display=${display}
+        .measurement=${{ ...moisture, key: scenario.key, unit: scenario.unit,
+          min: scenario.mean, max: (scenario.mean + scenario.max) / 2 }}
+        .history=${withStats({ min: scenario.min, mean: scenario.mean, max: scenario.max })}>
+      </mpl-metric-row>
+    </div>
+  `);
+  return wrapper.querySelector('mpl-metric-row')!;
+}
+
+describe('mpl-metric-row narrow layout', () => {
+  const wideWidth = 264;
+  const minimumWidth = 160;
+
+  it('derives the fixed breakpoint and minimum width from real formatted chips', async () => {
+    const widths: number[] = [];
+    for (const scenario of narrowStats) {
+      const el = await fixedWidthRow(360, scenario);
+      expect(badges(el).filter(badge => badge.classList.contains('out'))).to.have.length(2);
+      const gap = parseFloat(getComputedStyle(element(el, '.stats')).gap);
+      widths.push(badges(el).reduce((sum, badge) => sum + badge.getBoundingClientRect().width, 2 * gap));
+    }
+    const widest = Math.max(...widths);
+    expect(widest).to.be.closeTo(159.546875, 0.01);
+    expect(Math.ceil((widest + 88 + 12) / 8) * 8).to.equal(wideWidth);
+    expect(Math.ceil(widest)).to.equal(minimumWidth);
+  });
+
+  for (const width of [wideWidth, 360, wideWidth - 8, minimumWidth]) {
+    for (const scenario of narrowStats) {
+      it(`fits ${scenario.key} chips at ${width}px with the expected summary layout`, async () => {
+        const el = await fixedWidthRow(width, scenario);
+        const host = el.getBoundingClientRect();
+        const stats = element(el, '.stats');
+        const bounds = stats.getBoundingClientRect();
+        expect(host.width).to.equal(width);
+        if (width >= wideWidth) {
+          expect(getComputedStyle(element(el, '.ideal')).display).not.to.equal('none');
+          expect(getComputedStyle(stats).gridColumnStart).to.equal('2');
+          expect(getComputedStyle(stats).justifyContent).to.equal('space-between');
+          expect(bounds.left).to.be.greaterThan(element(el, '.value').getBoundingClientRect().left + 88 - 1);
+        } else {
+          expect(getComputedStyle(element(el, '.ideal')).display).to.equal('none');
+          expect(getComputedStyle(stats).gridColumnStart).to.equal('1');
+          expect(getComputedStyle(stats).gridColumnEnd).to.equal('-1');
+          expect(getComputedStyle(stats).justifyContent).to.equal('center');
+          expect(bounds.left - host.left).to.be.closeTo(host.right - bounds.right, 1);
+          const chips = badges(el);
+          expect(chips[0].getBoundingClientRect().left - host.left)
+            .to.be.closeTo(host.right - chips[2].getBoundingClientRect().right, 1);
+        }
+        for (const badge of badges(el)) {
+          const rect = badge.getBoundingClientRect();
+          expect(rect.left).to.be.at.least(host.left - 0.5);
+          expect(rect.right).to.be.at.most(host.right + 0.5);
+          expect(badge.scrollWidth).to.be.at.most(badge.clientWidth);
+        }
+      });
+    }
+  }
+
+  it('keeps Ideal displayed in graph mode at the minimum width', async () => {
+    const el = await fixedWidthRow(minimumWidth, narrowStats[0], 'graph');
+    expect(el.getBoundingClientRect().width).to.equal(minimumWidth);
+    expect(getComputedStyle(element(el, '.ideal')).display).not.to.equal('none');
+    expect(getComputedStyle(element(el, '.ideal')).gridColumnStart).to.equal('1');
+    expect(getComputedStyle(element(el, 'mpl-history-graph')).gridColumnStart).to.equal('2');
+  });
+});
+
 describe('mpl-metric-row', () => {
   it('renders the inline title, value, ideal and ordered badges in a 68px grid', async () => {
     const el = await row();
