@@ -1,6 +1,6 @@
 {
   "name": "material-plant-card",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A Material 3 Expressive plant card for the Home Assistant plant monitor integration, with circular range gauges, problem states and battery indicator.",
   "type": "module",
   "engines": {

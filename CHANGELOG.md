@@ -3,6 +3,16 @@
 All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] - 2026-10-15
+
+### Fixed
+
+- Narrow full-mode rows (below 268px) hide "Ideal" and centre the Min/Avg/Max chips instead of overflowing the tile. The ideal range stays in each tile's spoken label.
+- Sections-view minimum widths: full mode defaults to 12 columns with a 9-column minimum; compact mode defaults to 6 with a 6-column minimum.
+- Narrow cards (below 224px) stack the header so plant names stay readable: photo and battery on the first row, name and subtitle below. Keyboard focus follows the visual order.
+- Error-container colours fall back to a blend of the theme's error colour with the card surface, so problem chips and tiles stay legible on non-Material light and dark themes. Material You themes keep their own colours.
+- The min–max range pill stays inside the track at either end, and a metric whose min, max and current value coincide shows only the value ring.
+
 ## [0.1.0] - 2026-10-13
 
 First public release.
@@ -22,4 +32,5 @@ First public release.
 
 See the [configuration reference](README.md#card-options) and [migration guide](README.md#flower-card-compatibility).
 
+[0.1.1]: https://github.com/lageorgem/ha-material-plant-card/releases/tag/v0.1.1
 [0.1.0]: https://github.com/lageorgem/ha-material-plant-card/releases/tag/v0.1.0
