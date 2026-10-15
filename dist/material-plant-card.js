@@ -671,8 +671,8 @@ function t(t,e,i,s){var r,o=arguments.length,a=o<3?e:null===s?s=Object.getOwnPro
       align-items: center;
       min-width: 0;
     }
-    /* Arial chips 159.55px + 88px column + 12px gap + 20px headroom for production Roboto; round up to 280px. */
-    @container mpl-metric (width < 280px) {
+    /* Live worst case 161.7px (Google Sans Flex) + 88px column + 12px gap = 262px; 268px adds 6px margin. */
+    @container mpl-metric (width < 268px) {
       :host([display='summary']) .ideal {
         display: none;
       }
