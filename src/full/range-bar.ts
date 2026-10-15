@@ -39,6 +39,8 @@ export class MplRangeBar extends LitElement {
     const known = this.tone !== 'unknown';
     const from = this.spanFrom;
     const to = this.spanTo;
+    const degenerate = from !== null && to !== null && this.value !== null
+      && Math.max(Math.abs(to - from), Math.abs(this.value - from), Math.abs(this.value - to)) < 0.01;
     const spanWidth = from !== null && to !== null ? Math.abs(to - from) * 100 : 0;
     const midpoint = from !== null && to !== null ? (from + to) / 2 * 100 : 0;
     const avgColour = this.avgOk === null ? 'var(--mpl-on-surface-variant)'
@@ -50,10 +52,10 @@ export class MplRangeBar extends LitElement {
         <div class="tick tick-low"></div>
         <div class="tick tick-high"></div>
       ` : nothing}
-      ${known && from !== null && to !== null ? html`
-        <div class="span" style=${`left: calc(${midpoint}% - max(${spanWidth}%, 8px) / 2); width: max(${spanWidth}%, 8px); background: ${spanGradient(Math.min(from, to), Math.max(from, to))};`}></div>
+      ${known && !degenerate && from !== null && to !== null ? html`
+        <div class="span" style=${`left: clamp(0px, calc(${midpoint}% - max(${spanWidth}%, 8px) / 2), calc(100% - max(${spanWidth}%, 8px))); width: max(${spanWidth}%, 8px); background: ${spanGradient(Math.min(from, to), Math.max(from, to))};`}></div>
       ` : nothing}
-      ${known && this.avg !== null ? html`
+      ${known && !degenerate && this.avg !== null ? html`
         <div class="avg" style=${`left: clamp(0px, calc(${this.avg * 100}% - 5px), calc(100% - 10px)); background: ${avgColour};`}></div>
       ` : nothing}
       ${known && this.value !== null ? html`

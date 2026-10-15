@@ -117,7 +117,7 @@ describe('mpl-range-bar', () => {
     [0, 1, 0, 200],
   ]) {
     it(`positions and centres the span from ${from} to ${to}`, async () => {
-      const el = await mount(0.5, 'ok', from, to);
+      const el = await mount(0.7, 'ok', from, to);
       await finishAnimations(el);
       const rect = box(el, '.span');
       expect(rect.left).to.be.closeTo(left, 0.05);
@@ -126,6 +126,38 @@ describe('mpl-range-bar', () => {
       expect(rect.top).to.equal(8);
       expect(getComputedStyle(element(el, '.span')).borderRadius).to.equal('4px');
       expect(element(el, '.span').style.background).to.equal(spanGradient(Math.min(from, to), Math.max(from, to)));
+    });
+  }
+
+  for (const [from, to, value] of [
+    [1, 1, 1], [0, 0, 0], [0.995, 1, 1],
+    [0.5, 0.5, 0.505], [0.5, 0.5, 0.495],
+  ]) {
+    it(`shows only the ring for coincident range ${from}–${to} and value ${value}`, async () => {
+      const el = await mount(value, 'ok', from, to, value, null, true);
+      await finishAnimations(el);
+      expect(el.shadowRoot!.querySelector('.span')).to.equal(null);
+      expect(el.shadowRoot!.querySelector('.avg')).to.equal(null);
+      expect(el.shadowRoot!.querySelectorAll('.track, .tick').length).to.equal(3);
+      expect(el.shadowRoot!.querySelector('.dot')).not.to.equal(null);
+      const host = el.getBoundingClientRect();
+      const dot = element(el, '.dot').getBoundingClientRect();
+      expect(dot.left).to.be.at.least(host.left);
+      expect(dot.right).to.be.at.most(host.right);
+      expect(dot.width).to.equal(14);
+    });
+  }
+
+  for (const [from, to] of [[1, 1], [0, 0], [0.995, 1], [0, 0.005]]) {
+    it(`keeps the minimum-width pill inside the track for ${from}–${to} with value elsewhere`, async () => {
+      const el = await mount(0.5, 'ok', from, to, (from + to) / 2);
+      await finishAnimations(el);
+      expect(el.shadowRoot!.querySelector('.avg')).not.to.equal(null);
+      const host = el.getBoundingClientRect();
+      const span = element(el, '.span').getBoundingClientRect();
+      expect(span.left).to.be.at.least(host.left - 0.5);
+      expect(span.right).to.be.at.most(host.right + 0.5);
+      expect(span.width).to.be.closeTo(8, 0.5);
     });
   }
 
