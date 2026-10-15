@@ -57,10 +57,10 @@ async function fixedWidthRow(width: number, scenario: typeof narrowStats[number]
 }
 
 describe('mpl-metric-row narrow layout', () => {
-  const wideWidth = 264;
+  const wideWidth = 280;
   const minimumWidth = 160;
 
-  it('derives the fixed breakpoint and minimum width from real formatted chips', async () => {
+  it('derives the breakpoint with production-font headroom and minimum width from real formatted chips', async () => {
     const widths: number[] = [];
     for (const scenario of narrowStats) {
       const el = await fixedWidthRow(360, scenario);
@@ -70,7 +70,7 @@ describe('mpl-metric-row narrow layout', () => {
     }
     const widest = Math.max(...widths);
     expect(widest).to.be.closeTo(159.546875, 0.01);
-    expect(Math.ceil((widest + 88 + 12) / 8) * 8).to.equal(wideWidth);
+    expect(Math.ceil((widest + 88 + 12 + 20) / 8) * 8).to.equal(wideWidth);
     expect(Math.ceil(widest)).to.equal(minimumWidth);
   });
 
@@ -81,6 +81,11 @@ describe('mpl-metric-row narrow layout', () => {
         const host = el.getBoundingClientRect();
         const stats = element(el, '.stats');
         const bounds = stats.getBoundingClientRect();
+        expect(badges(el)).to.have.length(3);
+        for (const badge of badges(el)) {
+          expect(badge.children[1].textContent).not.to.equal('—');
+          expect(badge.children[1].textContent).to.match(/^\d+(?:\.\d+)?k?$/);
+        }
         expect(host.width).to.equal(width);
         if (width >= wideWidth) {
           expect(getComputedStyle(element(el, '.ideal')).display).not.to.equal('none');
