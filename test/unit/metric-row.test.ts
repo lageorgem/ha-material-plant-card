@@ -57,10 +57,10 @@ async function fixedWidthRow(width: number, scenario: typeof narrowStats[number]
 }
 
 describe('mpl-metric-row narrow layout', () => {
-  const wideWidth = 280;
+  const wideWidth = 268;
   const minimumWidth = 160;
 
-  it('derives the breakpoint with production-font headroom and minimum width from real formatted chips', async () => {
+  it('derives the breakpoint from live Google Sans Flex chips and minimum width from real formatted chips', async () => {
     const widths: number[] = [];
     for (const scenario of narrowStats) {
       const el = await fixedWidthRow(360, scenario);
@@ -70,11 +70,11 @@ describe('mpl-metric-row narrow layout', () => {
     }
     const widest = Math.max(...widths);
     expect(widest).to.be.closeTo(159.546875, 0.01);
-    expect(Math.ceil((widest + 88 + 12 + 20) / 8) * 8).to.equal(wideWidth);
+    expect(Math.ceil(161.7 + 88 + 12) + 6).to.equal(wideWidth);
     expect(Math.ceil(widest)).to.equal(minimumWidth);
   });
 
-  for (const width of [wideWidth, 360, wideWidth - 8, minimumWidth]) {
+  for (const width of [wideWidth, 360, wideWidth - 1, minimumWidth]) {
     for (const scenario of narrowStats) {
       it(`fits ${scenario.key} chips at ${width}px with the expected summary layout`, async () => {
         const el = await fixedWidthRow(width, scenario);
