@@ -104,6 +104,16 @@ describe('material-plant-card', () => {
     }
 
     for (const display_type of ['compact', 'full'] as const) {
+      it(`uses visual row reading order only for the narrow ${display_type} header`, async function () {
+        if (!CSS.supports('reading-flow', 'grid-rows')) this.skip();
+
+        const narrow = await fixedWidthCard(173, { display_type });
+        expect(getComputedStyle(query(narrow, '.header')).getPropertyValue('reading-flow')).to.equal('grid-rows');
+
+        const wide = await fixedWidthCard(228, { display_type });
+        expect(getComputedStyle(query(wide, '.header')).getPropertyValue('reading-flow')).not.to.equal('grid-rows');
+      });
+
       for (const width of [158, 173, 223]) {
         it(`stacks the ${display_type} header at ${width}px without overflow`, async () => {
           const card = await fixedWidthCard(width, { display_type });
