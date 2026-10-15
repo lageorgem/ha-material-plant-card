@@ -13,8 +13,8 @@ export const themeTokens = css`
     --mpl-success: var(--md-sys-color-success, var(--success-color, #4caf50));
     --mpl-error: var(--md-sys-color-error, var(--error-color, #b3261e));
     --mpl-on-error: var(--md-sys-color-on-error, #ffffff);
-    --mpl-error-container: var(--md-sys-color-error-container, #f9dedc);
-    --mpl-on-error-container: var(--md-sys-color-on-error-container, #410e0b);
+    --mpl-error-container: var(--md-sys-color-error-container, color-mix(in srgb, var(--mpl-error) 30%, var(--mpl-surface-bg)));
+    --mpl-on-error-container: var(--md-sys-color-on-error-container, var(--mpl-on-surface));
     --mpl-surface: var(--md-sys-color-surface, var(--card-background-color, #fef7ff));
     --mpl-surface-bg: var(--ha-card-background, var(--card-background-color, #f3edf7));
     --mpl-surface-container: var(--md-sys-color-surface-container, color-mix(in srgb, var(--mpl-on-surface) 8%, var(--mpl-surface-bg)));
