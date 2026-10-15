@@ -2053,17 +2053,116 @@ describe('material-plant-card', () => {
   });
 
   it('exposes sizing, grid, async editor and first-plant stub defaults', async () => {
+    const unconfigured = new MaterialPlantCard();
+    expect(unconfigured.getGridOptions()).to.deep.equal({ columns: 12, min_columns: 9, rows: 'auto' });
     const card = await mount(cfg({ display_type: undefined }));
     expect(card.getCardSize()).to.equal(13);
+    expect(card.getGridOptions()).to.deep.equal({ columns: 12, min_columns: 9, rows: 'auto' });
     card.setConfig(cfg({ display_type: 'compact' }));
     expect(card.getCardSize()).to.equal(4);
-    expect(card.getGridOptions()).to.deep.equal({ columns: 6, min_columns: 4, rows: 'auto' });
+    expect(card.getGridOptions()).to.deep.equal({ columns: 6, min_columns: 6, rows: 'auto' });
+    card.setConfig(cfg({ display_type: undefined }));
+    expect(card.getGridOptions()).to.deep.equal({ columns: 12, min_columns: 9, rows: 'auto' });
     const editor = await MaterialPlantCard.getConfigElement();
     expect(editor.tagName).to.equal('MATERIAL-PLANT-CARD-EDITOR');
     expect(customElements.get('material-plant-card-editor')).not.to.equal(undefined);
     expect(MaterialPlantCard.getStubConfig({ states: { 'light.first': state(), 'plant.first': state(), 'plant.second': state() } } as unknown as HomeAssistant))
       .to.deep.equal({ type: 'custom:material-plant-card', entity: 'plant.first', metrics: DEFAULT_GAUGES.map(type => ({ type })) });
     expect(MaterialPlantCard.getStubConfig({ states: {} } as HomeAssistant).entity).to.equal('plant.my_plant');
+  });
+
+  describe('sections-view minimum widths', () => {
+    const sectionWidth = (columns: number) => columns * ((320 - 88) / 12) + (columns - 1) * 8;
+    async function atWidth(columns: number, config: MaterialPlantCardConfig, hass = fakeHass()) {
+      const wrapper = await fixture<HTMLElement>(html`
+        <div style=${`width: ${sectionWidth(columns)}px; font-family: Arial, sans-serif`}>
+          <material-plant-card></material-plant-card>
+        </div>
+      `);
+      const card = wrapper.querySelector('material-plant-card')!;
+      card.setConfig(config);
+      assign(card, hass);
+      await settleLayout(card);
+      return card;
+    }
+
+    function horizontalOverflow(card: MaterialPlantCard) {
+      const bounds = query(card, 'ha-card').getBoundingClientRect();
+      const failures: { element: string; left: number; right: number }[] = [];
+      function inspect(root: ShadowRoot) {
+        for (const element of root.querySelectorAll('*')) {
+          const rect = element.getBoundingClientRect();
+          if (element.getClientRects().length && rect.width && rect.height) {
+            const left = bounds.left - rect.left;
+            const right = rect.right - bounds.right;
+            if (left > 0.5 || right > 0.5) failures.push({
+              element: `${element.tagName.toLowerCase()}.${element.getAttribute('class') ?? ''}`, left, right,
+            });
+          }
+          if (element.shadowRoot) inspect(element.shadowRoot);
+        }
+      }
+      inspect(card.shadowRoot!);
+      return failures;
+    }
+
+    it('measures the smallest compact span with six metrics, image, problems and battery', async () => {
+      const hass = fakeHass();
+      hass.states[ENTITY] = state('problem', { friendly_name: 'Calu Portocalu', species: 'Phalaenopsis', moisture_status: 'low' });
+      hass.states['sensor.moisture'] = state('5');
+      const measurements = [];
+      for (let columns = 3; columns <= 12; columns++) {
+        const card = await atWidth(columns, cfg({ image: IMAGE, battery_sensor: BATTERY,
+          metrics: DEFAULT_GAUGES.map(type => ({ type })) }), hass);
+        expect(gauges(card)).to.have.length(6);
+        expect(query(card, '.problem-badge')).not.to.equal(null);
+        expect(query(card, 'img')).not.to.equal(null);
+        measurements.push({ columns, width: sectionWidth(columns), overflow: horizontalOverflow(card) });
+        card.parentElement!.remove();
+      }
+      const minimum = measurements.find(measurement => measurement.overflow.length === 0);
+      expect(minimum, JSON.stringify(measurements)).not.to.equal(undefined);
+      expect(minimum!.columns).to.equal(6);
+      expect(measurements.find(measurement => measurement.columns === 6)!.overflow).to.be.empty;
+      const belowMinimum = measurements.find(measurement => measurement.columns === 5)!;
+      expect(belowMinimum.overflow).not.to.be.empty;
+      // The header's battery button exceeds the 128.67px card by 5.34px.
+      expect(belowMinimum.overflow.find(entry => entry.element === 'button.battery')!.right).to.be.closeTo(5.34, 0.1);
+    });
+
+    it('contains every full summary chip inside its tile at nine columns (238px)', async () => {
+      const data: PlantInfo = Object.fromEntries(DEFAULT_GAUGES.map(key => [key, {
+        min: 20.2, max: 23, current: 20.2, sensor: `sensor.${key}`, unit_of_measurement: '°C',
+      }]));
+      const hass = fakeHass(data);
+      hass.callWS.callsFake(async (message: Record<string, unknown>) => {
+        if (message.type === 'plant/get_info') return { result: data };
+        if (message.type === 'recorder/statistics_during_period') return Object.fromEntries(
+          (message.statistic_ids as string[]).map(id => [id, [{ start: Date.now() - 3600000,
+            end: Date.now(), min: 17.7, mean: 20.2, max: 27.1 }]]),
+        );
+        throw new Error(`Unexpected WebSocket request: ${String(message.type)}`);
+      });
+      const card = await atWidth(9, cfg({ display_type: undefined,
+        metrics: DEFAULT_GAUGES.map(type => ({ type, display: 'summary', period: '24h', daylight_only: false })),
+      }), hass);
+      expect(query(card, 'ha-card').getBoundingClientRect().width).to.equal(238);
+      const tiles = [...card.shadowRoot!.querySelectorAll<HTMLElement>('.tile')];
+      expect(tiles).to.have.length(6);
+      for (const tile of tiles) {
+        const row = tile.querySelector<MplMetricRow>('mpl-metric-row')!;
+        await row.updateComplete;
+        const bounds = tile.getBoundingClientRect();
+        const stats = [...row.shadowRoot!.querySelectorAll<HTMLElement>('.stat')];
+        expect(stats).to.have.length(3);
+        expect(stats.filter(stat => stat.classList.contains('out'))).to.have.length(2);
+        for (const stat of stats) {
+          const rect = stat.getBoundingClientRect();
+          expect(rect.left, `${row.measurement?.key} left`).to.be.at.least(bounds.left - 0.5);
+          expect(rect.right, `${row.measurement?.key} right`).to.be.at.most(bounds.right + 0.5);
+        }
+      }
+    });
   });
 
   it('keeps species, 56px photo and units in compact, with explicit hide override', async () => {

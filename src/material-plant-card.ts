@@ -468,7 +468,11 @@ export class MaterialPlantCard extends LitElement {
     return Math.ceil((100 + n * 86) / 50);
   }
   public getGridOptions(): { columns: number; min_columns: number; rows: 'auto' } {
-    return { columns: 6, min_columns: 4, rows: 'auto' };
+    // At a 320px section width, six columns fit the compact header; nine
+    // leave at least 160px for full-mode chips after card and tile padding.
+    return this._config?.display_type === 'compact'
+      ? { columns: 6, min_columns: 6, rows: 'auto' }
+      : { columns: 12, min_columns: 9, rows: 'auto' };
   }
   public static async getConfigElement() {
     await import('./editor');
