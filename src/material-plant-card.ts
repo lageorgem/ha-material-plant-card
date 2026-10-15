@@ -788,7 +788,7 @@ export class MaterialPlantCard extends LitElement {
     .header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
     .header.no-image { grid-template-columns: minmax(0, 1fr) auto; }
     @container mpl-card (width < 224px) {
-      .header:not(.no-image) { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'image battery' 'text text'; row-gap: 8px; }
+      .header:not(.no-image) { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'image battery' 'text text'; row-gap: 8px; reading-flow: grid-rows; }
       .header:not(.no-image) .image-btn { grid-area: image; }
       .header:not(.no-image) .text-btn { grid-area: text; }
       .header:not(.no-image) .battery { grid-area: battery; }
