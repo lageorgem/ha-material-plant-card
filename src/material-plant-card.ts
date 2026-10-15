@@ -468,8 +468,8 @@ export class MaterialPlantCard extends LitElement {
     return Math.ceil((100 + n * 86) / 50);
   }
   public getGridOptions(): { columns: number; min_columns: number; rows: 'auto' } {
-    // At a 320px section width, six columns fit the compact header; nine
-    // leave at least 160px for full-mode chips after card and tile padding.
+    // At a 320px section width, compact's six columns keep the 2×3 gauge grid legible;
+    // full's nine columns keep the narrow summary chips (160px) inside the tile.
     return this._config?.display_type === 'compact'
       ? { columns: 6, min_columns: 6, rows: 'auto' }
       : { columns: 12, min_columns: 9, rows: 'auto' };
@@ -777,7 +777,7 @@ export class MaterialPlantCard extends LitElement {
   }
 
   static styles = [themeTokens, css`
-    :host { display: block; --mpl-tile-gap: 2px; --mpl-tile-margin: 12px; --mpl-tile-padding: 8px 12px; --mpl-tile-corner: 4px; --mpl-tile-outer-corner: 16px; }
+    :host { display: block; container-type: inline-size; container-name: mpl-card; --mpl-tile-gap: 2px; --mpl-tile-margin: 12px; --mpl-tile-padding: 8px 12px; --mpl-tile-corner: 4px; --mpl-tile-outer-corner: 16px; }
     ha-card { position: relative; display: block; box-sizing: border-box; padding: 16px; background: var(--mpl-surface-bg); color: var(--mpl-on-surface); border-radius: var(--ha-card-border-radius, var(--mpl-shape-card)); }
     .tooltip { position: absolute; background: var(--mpl-inverse-surface); color: var(--mpl-inverse-on-surface); font-size: var(--md-sys-typescale-body-small-size, 12px); line-height: 16px; font-weight: 400; padding: 4px 8px; min-height: 24px; box-sizing: border-box; border-radius: var(--md-sys-shape-corner-extra-small, 4px); max-width: calc(100% - 16px); width: max-content; pointer-events: none; z-index: 2; animation: tooltip-enter 150ms cubic-bezier(0.2,0,0,1); transform-origin: bottom center; }
     .tooltip[data-source='mouse'] { pointer-events: auto; }
@@ -787,6 +787,12 @@ export class MaterialPlantCard extends LitElement {
     @media (prefers-reduced-motion: reduce) { .tooltip { animation: none; } }
     .header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 12px; align-items: center; }
     .header.no-image { grid-template-columns: minmax(0, 1fr) auto; }
+    @container mpl-card (width < 224px) {
+      .header:not(.no-image) { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: 'image battery' 'text text'; row-gap: 8px; }
+      .header:not(.no-image) .image-btn { grid-area: image; }
+      .header:not(.no-image) .text-btn { grid-area: text; }
+      .header:not(.no-image) .battery { grid-area: battery; }
+    }
     button { appearance: none; border: 0; margin: 0; padding: 0; background: none; color: inherit; font: inherit; cursor: pointer; }
     button:focus-visible, .tile:focus-visible { outline: 2px solid var(--mpl-primary); outline-offset: 2px; }
     .image-btn { position: relative; width: 56px; height: 56px; border-radius: var(--mpl-shape-full); }

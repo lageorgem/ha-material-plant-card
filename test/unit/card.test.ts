@@ -71,6 +71,73 @@ const gauges = (card: MaterialPlantCard) => [...card.shadowRoot!.querySelectorAl
 describe('material-plant-card', () => {
   afterEach(() => sinon.restore());
 
+  describe('narrow header', () => {
+    async function fixedWidthCard(width: number, overrides: Partial<MaterialPlantCardConfig> = {}) {
+      const wrapper = await fixture<HTMLElement>(html`
+        <div style=${`width: ${width}px; font-family: Arial, sans-serif`}>
+          <material-plant-card></material-plant-card>
+        </div>
+      `);
+      const card = wrapper.querySelector('material-plant-card')!;
+      card.setConfig(cfg({ battery_sensor: BATTERY, ...overrides }));
+      assign(card, fakeHass());
+      await settleLayout(card);
+      return card;
+    }
+
+    function rect(card: MaterialPlantCard, selector: string) {
+      return query(card, selector).getBoundingClientRect();
+    }
+
+    function expectContained(card: MaterialPlantCard) {
+      const bounds = rect(card, 'ha-card');
+      for (const child of query(card, '.header').querySelectorAll('*')) {
+        const box = child.getBoundingClientRect();
+        expect(box.left, `${child.tagName}.${child.className} left`).to.be.at.least(bounds.left);
+        expect(box.right, `${child.tagName}.${child.className} right`).to.be.at.most(bounds.right);
+      }
+    }
+
+    function expectSameRow(...boxes: DOMRect[]) {
+      const centers = boxes.map(box => (box.top + box.bottom) / 2);
+      expect(Math.max(...centers) - Math.min(...centers)).to.be.at.most(4);
+    }
+
+    for (const display_type of ['compact', 'full'] as const) {
+      for (const width of [158, 173, 223]) {
+        it(`stacks the ${display_type} header at ${width}px without overflow`, async () => {
+          const card = await fixedWidthCard(width, { display_type });
+          expect(rect(card, '.text-btn').top).to.be.at.least(rect(card, '.image-btn').bottom);
+          expect(rect(card, '.name').width).to.be.at.least(width === 158 ? 110 : 120);
+          expectSameRow(rect(card, '.image-btn'), rect(card, '.battery'));
+          expectContained(card);
+        });
+      }
+
+      for (const width of [224, 228]) {
+        it(`keeps the ${display_type} header on one row at ${width}px`, async () => {
+          const card = await fixedWidthCard(width, { display_type });
+          expectSameRow(rect(card, '.image-btn'), rect(card, '.text-btn'), rect(card, '.battery'));
+        });
+      }
+
+      it(`keeps the ${display_type} header on one row without an image at 173px`, async () => {
+        const card = await fixedWidthCard(173, { display_type, hide_image: true });
+        expect(query(card, '.image-btn')).to.equal(null);
+        expectSameRow(rect(card, '.text-btn'), rect(card, '.battery'));
+        expectContained(card);
+      });
+
+      it(`stacks full-width ${display_type} text without a battery at 173px`, async () => {
+        const card = await fixedWidthCard(173, { display_type, battery_sensor: undefined });
+        expect(query(card, '.battery')).to.equal(null);
+        expect(rect(card, '.text-btn').top).to.be.at.least(rect(card, '.image-btn').bottom);
+        expect(rect(card, '.name').width).to.be.closeTo(rect(card, '.header').width, 0.01);
+        expectContained(card);
+      });
+    }
+  });
+
   describe('initial fetch retries', () => {
     const clockForRetry = () => sinon.useFakeTimers({ now: Date.UTC(2026, 0, 15, 12), toFake: ['Date', 'setTimeout', 'clearTimeout'] });
 
@@ -2106,28 +2173,24 @@ describe('material-plant-card', () => {
       return failures;
     }
 
-    it('measures the smallest compact span with six metrics, image, problems and battery', async () => {
+    it('keeps every compact element inside the card from six columns up, with a readable name', async () => {
       const hass = fakeHass();
       hass.states[ENTITY] = state('problem', { friendly_name: 'Calu Portocalu', species: 'Phalaenopsis', moisture_status: 'low' });
       hass.states['sensor.moisture'] = state('5');
-      const measurements = [];
-      for (let columns = 3; columns <= 12; columns++) {
+      for (let columns = 6; columns <= 12; columns++) {
         const card = await atWidth(columns, cfg({ image: IMAGE, battery_sensor: BATTERY,
           metrics: DEFAULT_GAUGES.map(type => ({ type })) }), hass);
         expect(gauges(card)).to.have.length(6);
         expect(query(card, '.problem-badge')).not.to.equal(null);
         expect(query(card, 'img')).not.to.equal(null);
-        measurements.push({ columns, width: sectionWidth(columns), overflow: horizontalOverflow(card) });
+        expect(query(card, '.battery')).not.to.equal(null);
+        expect(horizontalOverflow(card), `${columns} columns (${sectionWidth(columns)}px)`).to.be.empty;
+        if (columns === 6) {
+          const nameWidth = query(card, '.name').getBoundingClientRect().width;
+          expect(nameWidth).to.be.at.least(100);
+        }
         card.parentElement!.remove();
       }
-      const minimum = measurements.find(measurement => measurement.overflow.length === 0);
-      expect(minimum, JSON.stringify(measurements)).not.to.equal(undefined);
-      expect(minimum!.columns).to.equal(6);
-      expect(measurements.find(measurement => measurement.columns === 6)!.overflow).to.be.empty;
-      const belowMinimum = measurements.find(measurement => measurement.columns === 5)!;
-      expect(belowMinimum.overflow).not.to.be.empty;
-      // The header's battery button exceeds the 128.67px card by 5.34px.
-      expect(belowMinimum.overflow.find(entry => entry.element === 'button.battery')!.right).to.be.closeTo(5.34, 0.1);
     });
 
     it('contains every full summary chip inside its tile at nine columns (238px)', async () => {
